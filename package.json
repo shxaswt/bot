@@ -1,0 +1,18 @@
+{
+  "name": "lol-guessing-bot",
+  "version": "3.0.0",
+  "description": "League of Legends guessing Discord bot",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "axios": "^1.6.5",
+    "dotenv": "^16.3.1",
+    "canvas": "^2.11.2"
+  }
+}
