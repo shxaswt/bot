@@ -1,0 +1,2 @@
+[phases.setup]
+nixPkgs = ["...", "pkg-config", "pixman", "cairo", "pango", "libpng", "jpeg", "giflib", "librsvg"]
