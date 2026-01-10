@@ -1447,12 +1447,25 @@ client.on('interactionCreate', async (interaction) => {
 // --- MESSAGE CREATE EVENT (Text Commands & Guessing) ---
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
+
+    // 🐱 MEOW HINT FEATURE
+    if (message.content.toLowerCase() === 'meow') {
+        const game = activeGames.get(message.channel.id);
+        if (game) {
+            // Get the first 2 letters of the champion name
+            const hint = game.champion.substring(0, 2);
+            await message.reply(`🐱 Meow! The champion starts with: **${hint}...**`);
+            return; // Return here so "meow" isn't counted as a wrong guess
+        }
+    }
     
+    // existing command handler
     if (message.content.toLowerCase().startsWith('lol ')) {
         await handleMessageCommand(message);
         return;
     }
     
+    // existing guessing logic
     await checkGuess(message);
 });
 
