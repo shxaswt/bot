@@ -1,3 +1,15 @@
+const http = require('http');
+
+// This keeps the bot alive on Render
+const port = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.write("I'm alive! The LoL Guessing Bot is running.");
+    res.end();
+}).listen(port, () => {
+    console.log(`✅ Web server listening on port ${port}`);
+});
+
+
 require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 const mongoose = require('mongoose');
