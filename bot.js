@@ -1,20 +1,18 @@
-const http = require('http');
-
-// This keeps the bot alive on Render
-const port = process.env.PORT || 3000;
-http.createServer((req, res) => {
-    res.write("I'm alive! The LoL Guessing Bot is running.");
-    res.end();
-}).listen(port, () => {
-    console.log(`✅ Web server listening on port ${port}`);
-});
-
-
 require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 const mongoose = require('mongoose');
 const axios = require('axios');
 const Canvas = require('canvas');
+const http = require('http'); // Add this
+
+// --- RENDER KEEP-ALIVE SERVER ---
+const port = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.write("I'm alive! LoL Bot is running.");
+    res.end();
+}).listen(port, () => {
+    console.log(`✅ Web server listening on port ${port}`);
+});
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
