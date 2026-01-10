@@ -3,3 +3,4 @@ node_modules/
 leaderboard.json
 *.log
 playerData.json
+botold.js
