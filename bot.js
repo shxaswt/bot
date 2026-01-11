@@ -1,4 +1,3 @@
-// Complete LoL Bot with MongoDB Integration - FIXED INVENTORY WITH USER TRACKING
 require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, AttachmentBuilder, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const mongoose = require('mongoose');
@@ -6,7 +5,7 @@ const axios = require('axios');
 const Canvas = require('canvas');
 const http = require('http');
 
-// --- RENDER KEEP-ALIVE SERVER ---
+// --- WEB SERVER (Keep Alive) ---
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -16,11 +15,13 @@ http.createServer((req, res) => {
     console.log(`✅ Web server listening on port ${port}`);
 });
 
+// --- DISCORD CLIENT ---
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
+        GatewayIntentBits.DirectMessages
     ]
 });
 
@@ -32,7 +33,7 @@ mongoose.connect(process.env.MONGODB_URI)
         process.exit(1);
     });
 
-// --- MONGODB SCHEMA ---
+// --- SCHEMA DEFINITION ---
 const playerSchema = new mongoose.Schema({
     userId: { type: String, required: true, unique: true },
     username: String,
@@ -49,15 +50,147 @@ const playerSchema = new mongoose.Schema({
     skinShards: { type: Array, default: [] },
     ownedChampions: { type: Array, default: [] },
     ownedSkins: { type: Array, default: [] },
-    lastDaily: { type: Number, default: 0 }
+    lastDaily: { type: Number, default: 0 },
+    // Hint Timestamps
+    lastHint: { type: Number, default: 0 }, 
+    lastMeow: { type: Number, default: 0 }, 
+    lastUwu: { type: Number, default: 0 },  
+    last7u7: { type: Number, default: 0 }   
 });
 
 const Player = mongoose.model('Player', playerSchema);
 
-// --- IN-MEMORY STORES (Ephemeral) ---
+// --- GLOBAL STATE ---
 const activeGames = new Map();
 const serverCooldowns = new Map();
 const pendingTrades = new Map();
+
+// --- CONFIG & CONSTANTS ---
+const RARITIES = {
+    COMMON: { name: 'Common', color: '#95A5A6', disenchant: 104, craftCost: 220 },   
+    EPIC: { name: 'Epic', color: '#00D9FF', disenchant: 270, craftCost: 1050 },      
+    LEGENDARY: { name: 'Legendary', color: '#E67E22', disenchant: 364, craftCost: 1520 }, 
+    ULTIMATE: { name: 'Ultimate', color: '#E74C3C', disenchant: 650, craftCost: 2950 }    
+};
+
+const BE_TIERS = [450, 1350, 3150, 4800, 6300];
+
+const CHAMPION_COSTS = {
+    450: { be: 450, disenchant: 90, upgrade: 270 },
+    1350: { be: 1350, disenchant: 270, upgrade: 810 },
+    3150: { be: 3150, disenchant: 630, upgrade: 1890 },
+    4800: { be: 4800, disenchant: 960, upgrade: 2880 },
+    6300: { be: 6300, disenchant: 1260, upgrade: 3780 }
+};
+
+const GAME_MODES = {
+    ability: { name: 'Ability', emoji: '⚡' },
+    splash: { name: 'Splash Art', emoji: '🎨' },
+    skin: { name: 'Skin', emoji: '👗' }
+};
+
+const DIFFICULTIES = {
+    easy: { time: 45000, basePoints: 2, pixelateBonus: 3, emoji: '🟢', name: 'Easy' },
+    normal: { time: 30000, basePoints: 5, pixelateBonus: 5, emoji: '🟡', name: 'Normal' },
+    hard: { time: 20000, basePoints: 8, pixelateBonus: 7, emoji: '🔴', name: 'Hard' },
+    v2: { time: 30000, basePoints: 12, pixelateBonus: 8, emoji: '🔵', name: 'V2 (Key)', answerType: 'key' },
+    v3: { time: 30000, basePoints: 15, pixelateBonus: 10, emoji: '🟣', name: 'V3 (Name)', answerType: 'name' }
+};
+
+// --- ROLES & META DATA (For Autofill) ---
+const ROLES = ['Top', 'Jungle', 'Mid', 'ADC', 'Support'];
+const ROLE_EMOJIS = {
+    'Top': '🛡️',
+    'Jungle': '🌲',
+    'Mid': '🧙',
+    'ADC': '🏹',
+    'Support': '❤️'
+};
+
+// Curated list to ensure "Respect the champs that have to play each role"
+const ROLE_CHAMPIONS = {
+    'Top': ['Aatrox', 'Camille', 'Darius', 'Fiora', 'Garen', 'Gnar', 'Illaoi', 'Irelia', 'Jax', 'Jayce', 'KSante', 'Kennen', 'Kled', 'Malphite', 'Mordekaiser', 'Nasus', 'Ornn', 'Pantheon', 'Poppy', 'Renekton', 'Riven', 'Rumble', 'Sett', 'Shen', 'Sion', 'Teemo', 'Tryndamere', 'Urgot', 'Volibear', 'Yone', 'Yorick'],
+    'Jungle': ['Amumu', 'BelVeth', 'Briar', 'Diana', 'Ekko', 'Elise', 'Evelynn', 'Fiddlesticks', 'Gragas', 'Graves', 'Hecarim', 'JarvanIV', 'Karthus', 'Kayn', 'KhaZix', 'Kindred', 'LeeSin', 'Lillia', 'MasterYi', 'Nidalee', 'Nocturne', 'Nunu', 'Rammus', 'Rengar', 'Sejuani', 'Shaco', 'Viego', 'Vi', 'Warwick', 'XinZhao', 'Zac'],
+    'Mid': ['Ahri', 'Akali', 'Anivia', 'Annie', 'AurelionSol', 'Azir', 'Cassiopeia', 'Corki', 'Fizz', 'Galio', 'Hwei', 'Irelia', 'Kassadin', 'Katarina', 'LeBlanc', 'Lissandra', 'Lux', 'Malzahar', 'Naafiri', 'Neeko', 'Orianna', 'Qiyana', 'Ryze', 'Sylas', 'Syndra', 'Talon', 'TwistedFate', 'Veigar', 'Vex', 'Viktor', 'Vladimir', 'Xerath', 'Yasuo', 'Yone', 'Zed', 'Zoe'],
+    'ADC': ['Aphelios', 'Ashe', 'Caitlyn', 'Draven', 'Ezreal', 'Jhin', 'Jinx', 'KaiSa', 'Kalista', 'KogMaw', 'Lucian', 'MissFortune', 'Nilah', 'Samira', 'Sivir', 'Smolder', 'Tristana', 'Twitch', 'Varus', 'Vayne', 'Xayah', 'Zeri', 'Ziggs'],
+    'Support': ['Alistar', 'Bard', 'Blitzcrank', 'Braum', 'Janna', 'Karma', 'Leona', 'Lulu', 'Lux', 'Maokai', 'Milio', 'Morgana', 'Nami', 'Nautilus', 'Pyke', 'Rakan', 'Rell', 'Renata', 'Senna', 'Seraphine', 'Sona', 'Soraka', 'Swain', 'TahmKench', 'Taric', 'Thresh', 'VelKoz', 'Xerath', 'Yuumi', 'Zilean', 'Zyra']
+};
+
+// --- RIOT DATA DRAGON ---
+let DD_VERSION = '14.1.1';
+let DD_BASE = `https://ddragon.leagueoflegends.com/cdn/${DD_VERSION}`;
+let championData = null;
+let championList = [];
+let championSkins = {};
+
+async function getLatestVersion() {
+    try {
+        const response = await axios.get('https://ddragon.leagueoflegends.com/api/versions.json');
+        return response.data[0];
+    } catch (error) {
+        return '14.1.1';
+    }
+}
+
+async function loadChampionData() {
+    try {
+        DD_VERSION = await getLatestVersion();
+        DD_BASE = `https://ddragon.leagueoflegends.com/cdn/${DD_VERSION}`;
+        console.log(`Using Data Dragon version: ${DD_VERSION}`);
+        
+        const response = await axios.get(`${DD_BASE}/data/en_US/champion.json`);
+        championData = response.data.data;
+        championList = Object.keys(championData);
+        championList.sort(); 
+        console.log(`✅ Loaded ${championList.length} champions`);
+    } catch (error) {
+        console.error('Error loading champion data:', error);
+    }
+}
+
+async function getChampionDetails(championKey) {
+    try {
+        const response = await axios.get(`${DD_BASE}/data/en_US/champion/${championKey}.json`);
+        const details = response.data.data[championKey];
+        if (!championSkins[championKey]) {
+            championSkins[championKey] = details.skins;
+        }
+        return details;
+    } catch (error) {
+        return null;
+    }
+}
+
+function getChampionIconUrl(championKey) {
+    return `${DD_BASE}/img/champion/${championKey}.png`;
+}
+
+function getSkinSplashUrl(championKey, skinNum) {
+    return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${championKey}_${skinNum}.jpg`;
+}
+
+function getSkinCenteredUrl(championKey, skinNum) {
+    return `https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${championKey}_${skinNum}.jpg`;
+}
+
+function getChampionPrice(championId) {
+    let hash = 0;
+    for (let i = 0; i < championId.length; i++) {
+        hash = championId.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const index = Math.abs(hash) % BE_TIERS.length;
+    return BE_TIERS[index];
+}
+
+// --- HELPERS ---
+function shuffleArray(array) {
+    const arr = [...array];
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
 
 // --- DATABASE HELPERS ---
 async function initPlayer(userId, username) {
@@ -99,95 +232,6 @@ async function updateScore(userId, username, timeTaken, basePoints, streakMultip
     
     await player.save();
     return { pointsEarned, beEarned, chestsEarned };
-}
-
-// --- CONSTANTS ---
-const RARITIES = {
-    COMMON: { name: 'Common', color: '#95A5A6', disenchant: 195, craftCost: 520 },
-    EPIC: { name: 'Epic', color: '#00D9FF', disenchant: 270, craftCost: 1050 },
-    LEGENDARY: { name: 'Legendary', color: '#E67E22', disenchant: 364, craftCost: 1520 },
-    ULTIMATE: { name: 'Ultimate', color: '#E74C3C', disenchant: 650, craftCost: 2950 }
-};
-
-const CHAMPION_COSTS = {
-    450: { be: 270, disenchant: 90 },
-    1350: { be: 810, disenchant: 270 },
-    3150: { be: 1890, disenchant: 630 },
-    4800: { be: 2880, disenchant: 960 },
-    6300: { be: 3780, disenchant: 1260 },
-    7800: { be: 4680, disenchant: 1560 }
-};
-
-const GAME_MODES = {
-    ability: { name: 'Ability', emoji: '⚡' },
-    splash: { name: 'Splash Art', emoji: '🎨' },
-    skin: { name: 'Skin', emoji: '👗' }
-};
-
-const DIFFICULTIES = {
-    easy: { time: 45000, basePoints: 2, pixelateBonus: 3, emoji: '🟢', name: 'Easy' },
-    normal: { time: 30000, basePoints: 5, pixelateBonus: 5, emoji: '🟡', name: 'Normal' },
-    hard: { time: 20000, basePoints: 8, pixelateBonus: 7, emoji: '🔴', name: 'Hard' },
-    v2: { time: 30000, basePoints: 12, pixelateBonus: 8, emoji: '🔵', name: 'V2 (Key)', answerType: 'key' },
-    v3: { time: 30000, basePoints: 15, pixelateBonus: 10, emoji: '🟣', name: 'V3 (Name)', answerType: 'name' }
-};
-
-// --- RIOT DATA DRAGON ---
-let DD_VERSION = '14.1.1';
-let DD_BASE = `https://ddragon.leagueoflegends.com/cdn/${DD_VERSION}`;
-let championData = null;
-let championList = [];
-let championSkins = {};
-
-async function getLatestVersion() {
-    try {
-        const response = await axios.get('https://ddragon.leagueoflegends.com/api/versions.json');
-        return response.data[0];
-    } catch (error) {
-        return '14.1.1';
-    }
-}
-
-async function loadChampionData() {
-    try {
-        DD_VERSION = await getLatestVersion();
-        DD_BASE = `https://ddragon.leagueoflegends.com/cdn/${DD_VERSION}`;
-        console.log(`Using Data Dragon version: ${DD_VERSION}`);
-        
-        const response = await axios.get(`${DD_BASE}/data/en_US/champion.json`);
-        championData = response.data.data;
-        championList = Object.keys(championData);
-        console.log(`✅ Loaded ${championList.length} champions`);
-    } catch (error) {
-        console.error('Error loading champion data:', error);
-    }
-}
-
-async function getChampionDetails(championKey) {
-    try {
-        const response = await axios.get(`${DD_BASE}/data/en_US/champion/${championKey}.json`);
-        const details = response.data.data[championKey];
-        
-        if (!championSkins[championKey]) {
-            championSkins[championKey] = details.skins;
-        }
-        
-        return details;
-    } catch (error) {
-        return null;
-    }
-}
-
-function getChampionIconUrl(championKey) {
-    return `${DD_BASE}/img/champion/${championKey}.png`;
-}
-
-function getSkinSplashUrl(championKey, skinNum) {
-    return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${championKey}_${skinNum}.jpg`;
-}
-
-function getSkinCenteredUrl(championKey, skinNum) {
-    return `https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${championKey}_${skinNum}.jpg`;
 }
 
 // --- IMAGE PROCESSING ---
@@ -299,13 +343,18 @@ function cleanupGame(channelId, guildId) {
     const game = activeGames.get(channelId);
     if (game) {
         if (game.timeoutId) clearTimeout(game.timeoutId);
-        if (game.hintTimeoutId) clearTimeout(game.hintTimeoutId);
-        activeGames.delete(channelId);
     }
     if (guildId) serverCooldowns.delete(guildId);
+    activeGames.delete(channelId);
 }
 
-async function startGame(interaction, mode, difficulty, pixelate) {
+function getEliminationChances(difficulty, pixelate) {
+    if (difficulty === 'v2' || difficulty === 'v3') return 3;
+    if (pixelate) return 2;
+    return 1;
+}
+
+async function startGame(interaction, mode, difficulty, pixelate, elimination = false) {
     const channelId = interaction.channel.id;
     const guildId = interaction.guild?.id;
     
@@ -331,6 +380,10 @@ async function startGame(interaction, mode, difficulty, pixelate) {
     
     let description = `Guess the champion!\n**Difficulty:** ${difficultyData.emoji} ${difficultyData.name}\n**Time:** ${difficultyData.time/1000}s\n**Points:** ${points} 🏆`;
     if (pixelate) description += '\n**Mode:** 🔲 Pixelated';
+    if (elimination) {
+        const chances = getEliminationChances(difficulty, pixelate);
+        description += `\n**⚠️ Elimination:** On (${chances} chance${chances>1?'s':''})`;
+    }
     
     const embed = new EmbedBuilder()
         .setTitle(`${modeData.emoji} ${modeData.name} Guessing Game`)
@@ -370,22 +423,16 @@ async function startGame(interaction, mode, difficulty, pixelate) {
         startTime: Date.now(), timeLimit: difficultyData.time, participants: new Set(),
         mode, difficulty, points, hintGiven: false, tags: content.tags, title: content.title,
         imageUrl: content.imageUrl, answerType: difficultyData.answerType || 'champion',
-        pixelate, timeoutId: null, hintTimeoutId: null
+        pixelate, 
+        elimination,
+        maxChances: elimination ? getEliminationChances(difficulty, pixelate) : 999,
+        wrongGuesses: new Map(),
+        eliminatedUsers: new Set(),
+        timeoutId: null
     };
     
     activeGames.set(channelId, gameData);
     if (guildId) serverCooldowns.set(guildId, Date.now() + 5000);
-    
-    if (difficulty !== 'v2' && difficulty !== 'v3') {
-        gameData.hintTimeoutId = setTimeout(async () => {
-            if (activeGames.has(channelId) && !activeGames.get(channelId).hintGiven) {
-                activeGames.get(channelId).hintGiven = true;
-                try {
-                    await interaction.followUp(`💡 **Hint:** ${gameData.tags.join(', ')} - "${gameData.title}"`);
-                } catch (e) {}
-            }
-        }, 15000);
-    }
     
     gameData.timeoutId = setTimeout(async () => {
         if (activeGames.has(channelId)) {
@@ -403,7 +450,9 @@ async function checkGuess(message) {
     const game = activeGames.get(message.channel.id);
     const userGuess = normalizeAnswer(message.content);
     
+    // Ignore if already answered correctly or eliminated
     if (game.participants.has(message.author.id)) return;
+    if (game.eliminatedUsers.has(message.author.id)) return;
     
     const isCorrect = game.normalizedAnswers.some(answer => userGuess === answer);
     const player = await initPlayer(message.author.id, message.author.username);
@@ -439,16 +488,88 @@ async function checkGuess(message) {
         await message.channel.send({ embeds: [embed] });
         cleanupGame(message.channel.id, message.guild?.id);
     } else {
+        // Wrong Guess Logic
         const isChampName = championList.some(c => normalizeAnswer(championData[c].name) === userGuess);
         if (isChampName || (message.content.split(' ').length <= 3)) {
             await message.react('❌');
+            
+            // Streak reset logic
             player.currentStreak = 0;
             await player.save();
+
+            // Elimination Logic
+            if (game.elimination) {
+                const currentWrongs = (game.wrongGuesses.get(message.author.id) || 0) + 1;
+                game.wrongGuesses.set(message.author.id, currentWrongs);
+                
+                if (currentWrongs >= game.maxChances) {
+                    game.eliminatedUsers.add(message.author.id);
+                    // Public message instead of skull reaction
+                    await message.channel.send(`Oopsie, <@${message.author.id}> just got eliminated :c`);
+                }
+            }
         }
     }
 }
 
-// --- INVENTORY SYSTEM ---
+// --- STORE SYSTEM (New) ---
+async function createStoreEmbed(player, page) {
+    const unownedChamps = championList.filter(cId => 
+        !player.ownedChampions.some(owned => owned.id === cId)
+    );
+    
+    const ITEMS_PER_PAGE = 5;
+    const totalPages = Math.ceil(unownedChamps.length / ITEMS_PER_PAGE) || 1;
+    const currentPage = Math.max(1, Math.min(page, totalPages));
+    
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const pageItems = unownedChamps.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    
+    const embed = new EmbedBuilder()
+        .setTitle('🛍️ Blue Essence Store')
+        .setColor('#0ACDFF')
+        .setFooter({ text: `Page ${currentPage}/${totalPages} | You have 💎 ${player.blueEssence} BE` });
+        
+    if (pageItems.length === 0) {
+        embed.setDescription('🎉 You own all champions!');
+    } else {
+        let desc = '';
+        for (const cId of pageItems) {
+            const name = championData[cId].name;
+            const cost = getChampionPrice(cId);
+            desc += `**${name}**\n💎 ${cost} BE\n\n`;
+        }
+        embed.setDescription(desc);
+        if(pageItems[0]) embed.setThumbnail(getChampionIconUrl(pageItems[0]));
+    }
+    
+    return { embed, totalPages, currentPage };
+}
+
+function createStoreButtons(currentPage, totalPages, userId) {
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`store_prev_${currentPage}_${userId}`)
+            .setLabel('◀️ Previous')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(currentPage <= 1),
+        new ButtonBuilder()
+            .setCustomId(`store_next_${currentPage}_${userId}`)
+            .setLabel('Next ▶️')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(currentPage >= totalPages)
+    );
+    return row;
+}
+
+function findChampionByName(input) {
+    const search = normalizeAnswer(input);
+    const exact = championList.find(c => normalizeAnswer(championData[c].name) === search);
+    if (exact) return exact;
+    return championList.find(c => normalizeAnswer(championData[c].name).startsWith(search));
+}
+
+// --- INVENTORY & OTHER UI ---
 async function createInventoryEmbed(player, page, type) {
     const items = type === 'champions' ? player.championShards : 
                   type === 'skins' ? player.skinShards :
@@ -500,10 +621,9 @@ async function createInventoryEmbed(player, page, type) {
     return { embed, totalPages, currentPage };
 }
 
-// FIXED: Now includes userId in button customId
+
 function createNavigationButtons(currentPage, totalPages, type, userId) {
     const row = new ActionRowBuilder();
-    
     row.addComponents(
         new ButtonBuilder()
             .setCustomId(`inv_prev_${type}_${currentPage}_${userId}`)
@@ -516,12 +636,9 @@ function createNavigationButtons(currentPage, totalPages, type, userId) {
             .setStyle(ButtonStyle.Primary)
             .setDisabled(currentPage >= totalPages)
     );
-    
     return row;
 }
 
-
-// FIXED: Now includes userId in button customId
 function createCategoryButtons(userId) {
     const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -533,7 +650,6 @@ function createCategoryButtons(userId) {
             .setLabel('✨ Skin Shards')
             .setStyle(ButtonStyle.Secondary)
     );
-    
     const row2 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`inv_cat_owned_champs_${userId}`)
@@ -544,18 +660,8 @@ function createCategoryButtons(userId) {
             .setLabel('✨ Owned Skins')
             .setStyle(ButtonStyle.Success)
     );
-    
     return [row1, row2];
 }
-
-
-function extractUserIdFromCustomId(customId) {
-    const parts = customId.split('_');
-    return parts[parts.length - 1];
-}
-
-// Continue to next artifact for trade system and rest of code...
-// CONTINUATION - Part 2 with Trade System and Commands
 
 // --- TRADE SYSTEM ---
 function createTradeButtons(tradeId) {
@@ -736,28 +842,19 @@ async function acceptTrade(interaction, tradeId) {
 
 async function declineTrade(interaction, tradeId) {
     const trade = pendingTrades.get(tradeId);
-    
-    if (!trade) {
-        return interaction.reply({ content: '❌ Trade expired or no longer exists!', flags: MessageFlags.Ephemeral });
-    }
+    if (!trade) return interaction.reply({ content: '❌ Trade expired!', flags: MessageFlags.Ephemeral });
     
     if (interaction.user.id !== trade.targetId) {
-        return interaction.reply({ content: '❌ Only the trade recipient can decline this trade!', flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: '❌ Not your trade!', flags: MessageFlags.Ephemeral });
     }
     
     pendingTrades.delete(tradeId);
-    
     const sadMessage = `<@${trade.offererId}> Sorry, it seems like <@${trade.targetId}> didn't want to trade :c`;
-
-    const embed = new EmbedBuilder()
-        .setTitle('💔 Trade Declined')
-        .setDescription(`**${trade.targetName}** turned down the offer. Better luck next time!`)
-        .setColor('#ff0000');
-    
+    const embed = new EmbedBuilder().setTitle('💔 Trade Declined').setDescription(`**${trade.targetName}** turned down the offer.`).setColor('#ff0000');
     await interaction.update({ content: sadMessage, embeds: [embed], components: [] });
 }
 
-// --- LOOT SYSTEM ---
+// --- CHESTS & DAILY ---
 async function openChest(userId) {
     const player = await Player.findOne({ userId });
     if (!player || player.chests < 1) {
@@ -772,13 +869,14 @@ async function openChest(userId) {
         const randomChamp = championList[Math.floor(Math.random() * championList.length)];
         const champInfo = championData[randomChamp];
         
-        const beValues = [450, 1350, 3150, 4800, 6300, 7800];
+        const beValues = [450, 1350, 3150, 4800, 6300];
         const beCost = beValues[Math.floor(Math.random() * beValues.length)];
+        const upgradeCost = CHAMPION_COSTS[beCost].upgrade;
         
         player.championShards.push({
             id: randomChamp,
             name: champInfo.name,
-            beCost: CHAMPION_COSTS[beCost].be,
+            beCost: upgradeCost,
             storePrice: beCost
         });
         
@@ -815,11 +913,9 @@ async function openChest(userId) {
             return { type: 'skin', data: skinShard };
         }
     }
-    
     return null;
 }
 
-// --- DAILY REWARDS ---
 async function claimDaily(userId, username) {
     const player = await initPlayer(userId, username);
     const now = Date.now();
@@ -835,10 +931,7 @@ async function claimDaily(userId, username) {
     
     if (lastClaimDate && lastClaimDate.getTime() === today.getTime() && now >= today.getTime()) {
         const nextReset = new Date(today);
-        if (now >= today.getTime()) {
-            nextReset.setDate(nextReset.getDate() + 1);
-        }
-        
+        if (now >= today.getTime()) nextReset.setDate(nextReset.getDate() + 1);
         const timeLeft = nextReset.getTime() - now;
         const hoursLeft = Math.floor(timeLeft / (60 * 60 * 1000));
         const minsLeft = Math.floor((timeLeft % (60 * 60 * 1000)) / (60 * 1000));
@@ -878,12 +971,14 @@ async function registerCommands() {
     if (!process.env.CLIENT_ID) return;
 
     const commands = [
-        new SlashCommandBuilder().setName('guess-ability').setDescription('Guess from ability').addStringOption(o => o.setName('difficulty').setDescription('Difficulty').addChoices({ name: '🟢 Easy (2pts | +3 pix = 5pts)', value: 'easy' }, { name: '🟡 Normal (5pts | +5 pix = 10pts)', value: 'normal' }, { name: '🔴 Hard (8pts | +7 pix = 15pts)', value: 'hard' }, { name: '🔵 V2 (12pts | +8 pix = 20pts)', value: 'v2' }, { name: '🟣 V3 (15pts | +10 pix = 25pts)', value: 'v3' })).addBooleanOption(o => o.setName('pixelated').setDescription('Pixelated mode')),
-        new SlashCommandBuilder().setName('guess-splash').setDescription('Guess from splash').addStringOption(o => o.setName('difficulty').setDescription('Difficulty').addChoices({ name: '🟢 Easy', value: 'easy' }, { name: '🟡 Normal', value: 'normal' }, { name: '🔴 Hard', value: 'hard' })).addBooleanOption(o => o.setName('pixelated').setDescription('Pixelated mode')),
-        new SlashCommandBuilder().setName('guess-skin').setDescription('Guess from skin').addStringOption(o => o.setName('difficulty').setDescription('Difficulty').addChoices({ name: '🟢 Easy', value: 'easy' }, { name: '🟡 Normal', value: 'normal' }, { name: '🔴 Hard', value: 'hard' })).addBooleanOption(o => o.setName('pixelated').setDescription('Pixelated mode')),
+        new SlashCommandBuilder().setName('guess-ability').setDescription('Guess from ability').addStringOption(o => o.setName('difficulty').setDescription('Difficulty').addChoices({ name: '🟢 Easy (2pts | +3 pix = 5pts)', value: 'easy' }, { name: '🟡 Normal (5pts | +5 pix = 10pts)', value: 'normal' }, { name: '🔴 Hard (8pts | +7 pix = 15pts)', value: 'hard' }, { name: '🔵 V2 (12pts | +8 pix = 20pts)', value: 'v2' }, { name: '🟣 V3 (15pts | +10 pix = 25pts)', value: 'v3' })).addBooleanOption(o => o.setName('pixelated').setDescription('Pixelated mode')).addBooleanOption(o => o.setName('elimination').setDescription('Enable Elimination Mode (Limited guesses)')),
+        new SlashCommandBuilder().setName('guess-splash').setDescription('Guess from splash').addStringOption(o => o.setName('difficulty').setDescription('Difficulty').addChoices({ name: '🟢 Easy', value: 'easy' }, { name: '🟡 Normal', value: 'normal' }, { name: '🔴 Hard', value: 'hard' })).addBooleanOption(o => o.setName('pixelated').setDescription('Pixelated mode')).addBooleanOption(o => o.setName('elimination').setDescription('Enable Elimination Mode')),
+        new SlashCommandBuilder().setName('guess-skin').setDescription('Guess from skin').addStringOption(o => o.setName('difficulty').setDescription('Difficulty').addChoices({ name: '🟢 Easy', value: 'easy' }, { name: '🟡 Normal', value: 'normal' }, { name: '🔴 Hard', value: 'hard' })).addBooleanOption(o => o.setName('pixelated').setDescription('Pixelated mode')).addBooleanOption(o => o.setName('elimination').setDescription('Enable Elimination Mode')),
         
         new SlashCommandBuilder().setName('profile').setDescription('View your profile').addUserOption(o => o.setName('user').setDescription('User to view')),
         new SlashCommandBuilder().setName('inventory').setDescription('View your inventory'),
+        new SlashCommandBuilder().setName('store').setDescription('View champion store'),
+        new SlashCommandBuilder().setName('buy').setDescription('Buy a champion').addStringOption(o => o.setName('champion').setDescription('Champion Name').setRequired(true)),
         new SlashCommandBuilder().setName('open-chest').setDescription('Open a Hextech Chest'),
         new SlashCommandBuilder().setName('craft-skin').setDescription('Craft a skin shard').addIntegerOption(o => o.setName('index').setDescription('Skin shard # (from inventory)').setRequired(true)),
         new SlashCommandBuilder().setName('craft-champion').setDescription('Unlock a champion').addIntegerOption(o => o.setName('index').setDescription('Champion shard # (from inventory)').setRequired(true)),
@@ -891,7 +986,11 @@ async function registerCommands() {
         new SlashCommandBuilder().setName('reroll-skins').setDescription('Reroll 3 skin shards').addIntegerOption(o => o.setName('shard1').setDescription('Shard 1').setRequired(true)).addIntegerOption(o => o.setName('shard2').setDescription('Shard 2').setRequired(true)).addIntegerOption(o => o.setName('shard3').setDescription('Shard 3').setRequired(true)),
         new SlashCommandBuilder().setName('lol-daily').setDescription('Claim daily reward'),
         new SlashCommandBuilder().setName('leaderboard').setDescription('View rankings'),
-        new SlashCommandBuilder().setName('help').setDescription('Show help')
+        new SlashCommandBuilder().setName('help').setDescription('Show help'),
+        // NEW HINT COMMANDS
+        new SlashCommandBuilder().setName('meow').setDescription('Get a hint (Meow style) - Only visible to you'),
+        new SlashCommandBuilder().setName('uwu').setDescription('Get a hint (UwU style) - Only visible to you'),
+        new SlashCommandBuilder().setName('7u7').setDescription('Get a hint (7u7 style) - Only visible to you')
     ];
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
@@ -903,13 +1002,105 @@ async function registerCommands() {
     }
 }
 
-// Continue to Part 3...// CONTINUATION - Part 3: Message Commands and Event Handlers
-
-// --- MESSAGE COMMAND HANDLER ---
+// --- MESSAGE HANDLER (CHAT COMMANDS) ---
 async function handleMessageCommand(message) {
     const content = message.content.toLowerCase().trim();
     
-    // FIXED: Now passes userId to button creation functions
+    // VIEW STORE
+    if (content === 'lol store') {
+        const player = await initPlayer(message.author.id, message.author.username);
+        const { embed, totalPages, currentPage } = await createStoreEmbed(player, 1);
+        const row = createStoreButtons(currentPage, totalPages, message.author.id);
+        await message.reply({ embeds: [embed], components: [row] });
+        return;
+    }
+
+    // AUTOFILL SYSTEM
+    if (content.startsWith('lol autofill')) {
+        const mentions = message.mentions.users.map(user => user);
+        
+        if (mentions.length === 0) {
+            return message.reply('❌ Please mention at least one user! (e.g., `lol autofill @user`)');
+        }
+        if (mentions.length > 5) {
+            return message.reply('❌ Max 5 players allowed for autofill!');
+        }
+
+        const isChampsMode = content.includes('champs');
+        
+        // Shuffle users and roles
+        const shuffledUsers = shuffleArray(mentions);
+        const shuffledRoles = shuffleArray(ROLES);
+
+        let desc = '';
+        const fields = [];
+
+        shuffledUsers.forEach((user, index) => {
+            const role = shuffledRoles[index];
+            const roleEmoji = ROLE_EMOJIS[role];
+            let entry = `${roleEmoji} **${role}:** <@${user.id}>`;
+
+            if (isChampsMode) {
+                const possibleChamps = ROLE_CHAMPIONS[role];
+                // Check if we have data for this role (fallback to random if logic fails)
+                const champName = possibleChamps ? possibleChamps[Math.floor(Math.random() * possibleChamps.length)] : championList[Math.floor(Math.random() * championList.length)];
+                
+                // Try to get icon (basic checking)
+                const champKey = championList.find(c => championData[c].name === champName);
+                
+                // Format: "@User will be playing Kayn (Jungle)"
+                entry = `${roleEmoji} **${role}:** <@${user.id}> playing **${champName}**`;
+            }
+            desc += `${entry}\n`;
+        });
+
+        const embed = new EmbedBuilder()
+            .setTitle(isChampsMode ? '🎲 Autofill with Champions' : '🎲 Autofill Roles')
+            .setDescription(desc)
+            .setColor('#E91E63')
+            .setTimestamp();
+
+        await message.reply({ embeds: [embed] });
+        return;
+    }
+
+    // BUY CHAMPION
+    const buyMatch = content.match(/^lol store buy (.+)$/);
+    if (buyMatch) {
+        const nameInput = buyMatch[1].trim();
+        const player = await initPlayer(message.author.id, message.author.username);
+        
+        const champId = findChampionByName(nameInput);
+        if (!champId) return message.reply('❌ Champion not found!');
+        
+        const champName = championData[champId].name;
+        
+        if (player.ownedChampions.some(c => c.id === champId)) {
+            return message.reply(`❌ You already own **${champName}**!`);
+        }
+        
+        const price = getChampionPrice(champId);
+        
+        if (player.blueEssence < price) {
+            return message.reply(`❌ Not enough Blue Essence!\nCost: 💎 ${price}\nYou have: 💎 ${player.blueEssence}`);
+        }
+        
+        player.blueEssence -= price;
+        player.ownedChampions.push({ id: champId, name: champName });
+        await player.save();
+        
+        const embed = new EmbedBuilder()
+            .setTitle('🛒 Purchase Successful!')
+            .setDescription(`You unlocked **${champName}**!`)
+            .setThumbnail(getChampionIconUrl(champId))
+            .setColor('#2ecc71')
+            .setFooter({ text: `Remaining: 💎 ${player.blueEssence} BE` });
+        
+        await message.reply({ embeds: [embed] });
+        return;
+    }
+
+    // INVENTORY
     if (content === 'lol inv' || content === 'lol inventory') {
         const player = await initPlayer(message.author.id, message.author.username);
         const { embed, totalPages, currentPage } = await createInventoryEmbed(player, 1, 'champions');
@@ -919,6 +1110,7 @@ async function handleMessageCommand(message) {
         return;
     }
     
+    // DAILY
     if (content === 'lol daily') {
         const result = await claimDaily(message.author.id, message.author.username);
         if (!result.success) {
@@ -928,6 +1120,7 @@ async function handleMessageCommand(message) {
         return;
     }
     
+    // OPEN CHEST
     if (content === 'lol oc' || content === 'lol open chest') {
         const player = await initPlayer(message.author.id, message.author.username);
         if (player.chests < 1) return message.reply('❌ No chests!');
@@ -956,6 +1149,7 @@ async function handleMessageCommand(message) {
         return;
     }
     
+    // PROFILE
     if (content === 'lol profile' || content === 'lol prof') {
         const player = await Player.findOne({ userId: message.author.id });
         if (!player) return message.reply('❌ No data found!');
@@ -973,6 +1167,7 @@ async function handleMessageCommand(message) {
         return;
     }
     
+    // LEADERBOARD
     if (content === 'lol lb' || content === 'lol leaderboard') {
         const players = await Player.find().sort({ totalPoints: -1 }).limit(10);
         if (players.length === 0) return message.reply('📊 No data!');
@@ -985,17 +1180,20 @@ async function handleMessageCommand(message) {
         return;
     }
     
+    
     if (content === 'lol help' || content === 'lol h') {
         const embed = new EmbedBuilder()
             .setTitle('🎮 LoL Guessing Bot - Quick Commands')
             .setDescription('**All commands work in chat!**')
             .addFields(
                 { name: '🎯 Games', value: '`lol ga [diff] [px]` - Guess ability\n`lol gsp [diff] [px]` - Guess splash\n`lol gsk [diff] [px]` - Guess skin\n\n**Difficulties:** `ez`, `mid`, `hard`, `v2`, `v3`\n**Pixelated:** Add `px` at end\n**Examples:** `lol ga v2`, `lol gsp hard px`' },
+                { name: '🎲 Autofill', value: '`lol autofill @u1 @u2...` - Assign roles\n`lol autofill champs @u1...` - Assign roles & champs' },
                 { name: '💰 Economy', value: '`lol daily` - Daily reward\n`lol oc` - Open chest\n`lol inv` - View inventory' },
+                { name: '🛍️ Store', value: '`lol store` - Browse champions\n`lol store buy <name>` - Buy champ' },
                 { name: '🔨 Crafting', value: '`lol craft skin <#>` - Unlock skin\n`lol craft champ <#>` - Unlock champion\n`lol de <#>` - Disenchant skin\n`lol reroll <#> <#> <#>` - Reroll 3 skins' },
                 { name: '🔄 Trading', value: '`lol trade @user <your#> <their#>` - Trade skins\n`lol trade champ @user <your#> <their#>` - Trade champs\nExample: `lol trade @momo 1 4`\nTrades expire in 5 minutes' },
                 { name: '📊 Info', value: '`lol profile` / `lol prof` - Your stats\n`lol lb` - Leaderboard' },
-                { name: '💎 Rewards', value: '**2500 BE** per 50 pts\n**1 Chest** per 20 pts' }
+                { name: '🤫 Hints', value: 'Use `/meow`, `/uwu`, or `/7u7` during a game to get a secret hint!' }
             )
             .setColor('#0099ff');
         await message.reply({ embeds: [embed] });
@@ -1039,7 +1237,7 @@ async function handleMessageCommand(message) {
         return;
     }
     
-    // CRAFT CHAMPION
+    // CRAFT CHAMPION (FROM SHARD)
     const craftChampMatch = content.match(/^lol craft champ (\d+)$/);
     if (craftChampMatch) {
         const player = await Player.findOne({ userId: message.author.id });
@@ -1049,7 +1247,7 @@ async function handleMessageCommand(message) {
         if (idx < 0 || idx >= player.championShards.length) return message.reply('❌ Invalid!');
         
         const shard = player.championShards[idx];
-        const cost = shard.beCost;
+        const cost = shard.beCost; 
         
         if (player.blueEssence < cost) {
             return message.reply(`❌ Need 💎 ${cost} BE! You have 💎 ${player.blueEssence} BE`);
@@ -1136,16 +1334,24 @@ async function handleMessageCommand(message) {
         return;
     }
     
-    // GAME COMMANDS
-    const gameMatch = content.match(/^lol (ga|gsp|gsk)(\s+(ez|mid|hard|v2|v3))?(\s+px)?$/);
+    // GAME COMMANDS (Chat Based)
+    const gameMatch = content.match(/^lol (ga|gsp|gsk)(.*)$/);
     if (gameMatch) {
         const modeMap = { ga: 'ability', gsp: 'splash', gsk: 'skin' };
-        const diffMap = { ez: 'easy', mid: 'normal' };
+        const diffMap = { ez: 'easy', mid: 'normal', v2: 'v2', v3: 'v3' };
+        
+        const args = gameMatch[2].trim().split(/\s+/);
         
         const mode = modeMap[gameMatch[1]];
-        let difficulty = gameMatch[3] || 'normal';
-        difficulty = diffMap[difficulty] || difficulty;
-        const pixelate = !!gameMatch[4];
+        let difficulty = 'normal';
+        let pixelate = false;
+        let elimination = false;
+
+        args.forEach(arg => {
+            if (diffMap[arg] || arg === 'easy' || arg === 'hard') difficulty = diffMap[arg] || arg;
+            if (arg === 'px') pixelate = true;
+            if (arg === 'elm') elimination = true;
+        });
         
         const fakeInteraction = {
             channel: message.channel,
@@ -1154,20 +1360,16 @@ async function handleMessageCommand(message) {
             deferred: false,
             replied: false,
             deferReply: async () => {},
-            editReply: async (data) => {
-                await message.reply(data);
-            },
-            followUp: async (data) => {
-                await message.channel.send(data);
-            }
+            editReply: async (data) => { await message.reply(data); },
+            followUp: async (data) => { await message.channel.send(data); }
         };
         
-        await startGame(fakeInteraction, mode, difficulty, pixelate);
+        await startGame(fakeInteraction, mode, difficulty, pixelate, elimination);
         return;
     }
 }
 
-// --- CLIENT READY EVENT ---
+// --- EVENTS ---
 client.on('ready', async () => {
     console.log(`✅ ${client.user.tag}`);
     await loadChampionData();
@@ -1175,20 +1377,96 @@ client.on('ready', async () => {
     console.log('🎮 Ready!');
 });
 
-// --- INTERACTION CREATE EVENT (Slash Commands & Buttons) ---
-// --- INTERACTION CREATE EVENT (Slash Commands & Buttons) ---
 client.on('interactionCreate', async (interaction) => {
     try {
         if (interaction.isChatInputCommand()) {
             const { commandName, options } = interaction;
 
-            if (commandName === 'guess-ability') {
-                await startGame(interaction, 'ability', options.getString('difficulty') || 'normal', options.getBoolean('pixelated') || false);
-            } else if (commandName === 'guess-splash') {
-                await startGame(interaction, 'splash', options.getString('difficulty') || 'normal', options.getBoolean('pixelated') || false);
-            } else if (commandName === 'guess-skin') {
-                await startGame(interaction, 'skin', options.getString('difficulty') || 'normal', options.getBoolean('pixelated') || false);
-            } else if (commandName === 'profile') {
+            // HINT COMMANDS
+            if (['meow', 'uwu', '7u7'].includes(commandName)) {
+                const game = activeGames.get(interaction.channel.id);
+                if (!game) {
+                    return interaction.reply({ content: '❌ No game active!', flags: MessageFlags.Ephemeral });
+                }
+
+                const player = await initPlayer(interaction.user.id, interaction.user.username);
+                const hintTypes = { 'meow': 'lastMeow', 'uwu': 'lastUwu', '7u7': 'last7u7' };
+                const dbField = hintTypes[commandName];
+                
+                const now = Date.now();
+                const todayReset = new Date();
+                todayReset.setHours(8, 0, 0, 0);
+                if (now < todayReset.getTime()) todayReset.setDate(todayReset.getDate() - 1);
+                
+                const lastUsed = player[dbField] || 0;
+                if (lastUsed > todayReset.getTime()) {
+                    const nextReset = new Date(todayReset);
+                    nextReset.setDate(nextReset.getDate() + 1);
+                    const timeLeft = nextReset.getTime() - now;
+                    const hoursLeft = Math.floor(timeLeft / (60 * 60 * 1000));
+                    const minsLeft = Math.floor((timeLeft % (60 * 60 * 1000)) / (60 * 1000));
+                    return interaction.reply({ content: `⏳ You already used your **${commandName}** hint today! Resets in ${hoursLeft}h ${minsLeft}m.`, flags: MessageFlags.Ephemeral });
+                }
+
+                const hint = game.champion.substring(0, 2);
+                player[dbField] = now;
+                await player.save();
+
+                return interaction.reply({ content: `🤫 **${commandName} Hint:** The champion starts with **${hint}...**`, flags: MessageFlags.Ephemeral });
+            }
+
+            // GAME COMMANDS
+            if (['guess-ability', 'guess-splash', 'guess-skin'].includes(commandName)) {
+                const modeMap = { 'guess-ability': 'ability', 'guess-splash': 'splash', 'guess-skin': 'skin' };
+                await startGame(
+                    interaction, 
+                    modeMap[commandName], 
+                    options.getString('difficulty') || 'normal', 
+                    options.getBoolean('pixelated') || false,
+                    options.getBoolean('elimination') || false
+                );
+            } 
+            // STORE
+            else if (commandName === 'store') {
+                const player = await initPlayer(interaction.user.id, interaction.user.username);
+                const { embed, totalPages, currentPage } = await createStoreEmbed(player, 1);
+                const row = createStoreButtons(currentPage, totalPages, interaction.user.id);
+                await interaction.reply({ embeds: [embed], components: [row] });
+            }
+            else if (commandName === 'buy') {
+                const nameInput = options.getString('champion');
+                const player = await initPlayer(interaction.user.id, interaction.user.username);
+                
+                const champId = findChampionByName(nameInput);
+                if (!champId) return interaction.reply({ content: '❌ Champion not found!', flags: MessageFlags.Ephemeral });
+                
+                const champName = championData[champId].name;
+                
+                if (player.ownedChampions.some(c => c.id === champId)) {
+                    return interaction.reply({ content: `❌ You already own **${champName}**!`, flags: MessageFlags.Ephemeral });
+                }
+                
+                const price = getChampionPrice(champId);
+                
+                if (player.blueEssence < price) {
+                    return interaction.reply({ content: `❌ Not enough Blue Essence!\nCost: 💎 ${price}\nYou have: 💎 ${player.blueEssence}`, flags: MessageFlags.Ephemeral });
+                }
+                
+                player.blueEssence -= price;
+                player.ownedChampions.push({ id: champId, name: champName });
+                await player.save();
+                
+                const embed = new EmbedBuilder()
+                    .setTitle('🛒 Purchase Successful!')
+                    .setDescription(`You unlocked **${champName}**!`)
+                    .setThumbnail(getChampionIconUrl(champId))
+                    .setColor('#2ecc71')
+                    .setFooter({ text: `Remaining: 💎 ${player.blueEssence} BE` });
+                
+                await interaction.reply({ embeds: [embed] });
+            }
+            // OTHER COMMANDS
+            else if (commandName === 'profile') {
                 const target = options.getUser('user') || interaction.user;
                 const player = await Player.findOne({ userId: target.id });
                 if (!player) return interaction.reply({ content: '❌ No data found!', flags: MessageFlags.Ephemeral });
@@ -1358,20 +1636,19 @@ client.on('interactionCreate', async (interaction) => {
                 const embed = new EmbedBuilder()
                     .setTitle('🎮 LoL Guessing Bot')
                     .addFields(
-                        { name: '🎯 Games', value: '`/guess-ability` `/guess-splash` `/guess-skin`' },
+                        { name: '🎯 Games', value: '`/guess-ability` `/guess-splash` `/guess-skin`\nUse `elimination` option for challenge mode!' },
                         { name: '💰 Economy', value: '**Earn:** 💎 2500 BE per 50 pts\n**Chests:** 🎁 1 per 20 pts\n`/lol-daily` - Daily rewards' },
-                        { name: '📦 Inventory', value: '`/inventory` - View shards (Card View)\n`/open-chest` - Open chest\n`/profile` - View stats' },
-                        { name: '🔨 Crafting', value: '`/craft-skin` - Unlock skin (🔶 OE)\n`/craft-champion` - Unlock champ (💎 BE)\n`/disenchant` - Get 🔶 OE\n`/reroll-skins` - 3 shards → 1 skin' }
+                        { name: '🛍️ Store', value: '`/store` - Browse champions\n`/buy` - Buy champion' },
+                        { name: '🔨 Crafting', value: '`/craft-skin` - Unlock skin (🔶 OE)\n`/craft-champion` - Unlock champ (💎 BE)\n`/disenchant` - Get 🔶 OE' },
+                        { name: '🤫 Hints', value: '`/meow`, `/uwu`, `/7u7` - Only visible to you!' }
                     )
                     .setColor('#0099ff');
                 await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
             }
         } 
-        // --- BUTTON HANDLING STARTS HERE (FIXED) ---
         else if (interaction.isButton()) {
             const customId = interaction.customId;
 
-            // 1. TRADE BUTTONS
             if (customId.startsWith('trade_')) {
                 const parts = customId.split('_');
                 const action = parts[1]; 
@@ -1385,54 +1662,47 @@ client.on('interactionCreate', async (interaction) => {
                 return;
             }
 
-            // 2. INVENTORY BUTTONS
             const parts = customId.split('_');
-            
-            // FIX: Always grab the LAST part as the User ID
-            // This works for "inv_cat_champions_123" AND "inv_cat_owned_champs_123"
             const ownerId = parts[parts.length - 1]; 
 
-            // Verify ownership
             if (ownerId && ownerId !== interaction.user.id) {
                 return interaction.reply({ 
-                    content: '❌ This is not your inventory! Use `/inventory` or `lol inv` to view your own.', 
+                    content: '❌ Not your menu! Type the command yourself.', 
                     flags: MessageFlags.Ephemeral 
                 });
             }
 
-            // Load Player
             const player = await Player.findOne({ userId: interaction.user.id });
             if (!player) return interaction.reply({ content: '❌ No data!', flags: MessageFlags.Ephemeral });
             
+            if (customId.startsWith('store_')) {
+                const direction = parts[1];
+                const currentPage = parseInt(parts[2]);
+                const newPage = direction === 'next' ? currentPage + 1 : currentPage - 1;
+                
+                const { embed, totalPages, currentPage: actualPage } = await createStoreEmbed(player, newPage);
+                const row = createStoreButtons(actualPage, totalPages, interaction.user.id);
+                
+                await interaction.update({ embeds: [embed], components: [row] });
+                return;
+            }
+
             if (customId.startsWith('inv_cat_')) {
-                // FIX: Dynamically extract type from middle parts
-                // Example: inv_cat_owned_champs_123 -> "owned_champs"
                 const type = parts.slice(2, parts.length - 1).join('_');
-                
                 const { embed, totalPages, currentPage } = await createInventoryEmbed(player, 1, type);
-                
                 const navButtons = createNavigationButtons(currentPage, totalPages, type, interaction.user.id);
                 const catButtons = createCategoryButtons(interaction.user.id);
-                
                 await interaction.update({ embeds: [embed], components: [navButtons, ...catButtons] });
             } 
             else if (customId.startsWith('inv_prev_') || customId.startsWith('inv_next_')) {
-                // ID Format: inv_prev_champions_1_123456789
-                // parts[1] is direction
                 const direction = parts[1]; 
-                
-                // The page number is always the second to last element
                 const currentBtnPage = parseInt(parts[parts.length - 2]); 
-                
-                // The type is everything between index 2 and the page number
                 const type = parts.slice(2, parts.length - 2).join('_');
-
                 const newPage = direction === 'next' ? currentBtnPage + 1 : currentBtnPage - 1;
-                const { embed, totalPages, currentPage: actualPage } = await createInventoryEmbed(player, newPage, type);
                 
+                const { embed, totalPages, currentPage: actualPage } = await createInventoryEmbed(player, newPage, type);
                 const navButtons = createNavigationButtons(actualPage, totalPages, type, interaction.user.id);
                 const catButtons = createCategoryButtons(interaction.user.id);
-                
                 await interaction.update({ embeds: [embed], components: [navButtons, ...catButtons] });
             }
         }
@@ -1444,32 +1714,21 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// --- MESSAGE CREATE EVENT (Text Commands & Guessing) ---
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    // 🐱 MEOW HINT FEATURE
-    if (message.content.toLowerCase() === 'meow') {
-        const game = activeGames.get(message.channel.id);
-        if (game) {
-            // Get the first 2 letters of the champion name
-            const hint = game.champion.substring(0, 2);
-            await message.reply(`🐱 Meow! The champion starts with: **${hint}...**`);
-            return; // Return here so "meow" isn't counted as a wrong guess
-        }
-    }
+    const content = message.content.toLowerCase().trim();
     
-    // existing command handler
-    if (message.content.toLowerCase().startsWith('lol ')) {
+    // COMMANDS
+    if (content.startsWith('lol ')) {
         await handleMessageCommand(message);
         return;
     }
     
-    // existing guessing logic
+    // GUESSING
     await checkGuess(message);
 });
 
-// --- ERROR HANDLERS ---
 client.on('error', console.error);
 process.on('unhandledRejection', console.error);
 process.on('SIGTERM', () => {
@@ -1478,5 +1737,4 @@ process.on('SIGTERM', () => {
     process.exit(0);
 });
 
-// --- LOGIN ---
 client.login(process.env.DISCORD_TOKEN);
