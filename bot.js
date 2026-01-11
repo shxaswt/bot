@@ -109,11 +109,11 @@ const ROLE_EMOJIS = {
 
 // Curated list to ensure "Respect the champs that have to play each role"
 const ROLE_CHAMPIONS = {
-    'Top': ['Aatrox', 'Camille', 'Darius', 'Fiora', 'Garen', 'Gnar', 'Illaoi', 'Irelia', 'Jax', 'Jayce', 'KSante', 'Kennen', 'Kled', 'Malphite', 'Mordekaiser', 'Nasus', 'Ornn', 'Pantheon', 'Poppy', 'Renekton', 'Riven', 'Rumble', 'Sett', 'Shen', 'Sion', 'Teemo', 'Tryndamere', 'Urgot', 'Volibear', 'Yone', 'Yorick'],
-    'Jungle': ['Amumu', 'BelVeth', 'Briar', 'Diana', 'Ekko', 'Elise', 'Evelynn', 'Fiddlesticks', 'Gragas', 'Graves', 'Hecarim', 'JarvanIV', 'Karthus', 'Kayn', 'KhaZix', 'Kindred', 'LeeSin', 'Lillia', 'MasterYi', 'Nidalee', 'Nocturne', 'Nunu', 'Rammus', 'Rengar', 'Sejuani', 'Shaco', 'Viego', 'Vi', 'Warwick', 'XinZhao', 'Zac'],
-    'Mid': ['Ahri', 'Akali', 'Anivia', 'Annie', 'AurelionSol', 'Azir', 'Cassiopeia', 'Corki', 'Fizz', 'Galio', 'Hwei', 'Irelia', 'Kassadin', 'Katarina', 'LeBlanc', 'Lissandra', 'Lux', 'Malzahar', 'Naafiri', 'Neeko', 'Orianna', 'Qiyana', 'Ryze', 'Sylas', 'Syndra', 'Talon', 'TwistedFate', 'Veigar', 'Vex', 'Viktor', 'Vladimir', 'Xerath', 'Yasuo', 'Yone', 'Zed', 'Zoe'],
-    'ADC': ['Aphelios', 'Ashe', 'Caitlyn', 'Draven', 'Ezreal', 'Jhin', 'Jinx', 'KaiSa', 'Kalista', 'KogMaw', 'Lucian', 'MissFortune', 'Nilah', 'Samira', 'Sivir', 'Smolder', 'Tristana', 'Twitch', 'Varus', 'Vayne', 'Xayah', 'Zeri', 'Ziggs'],
-    'Support': ['Alistar', 'Bard', 'Blitzcrank', 'Braum', 'Janna', 'Karma', 'Leona', 'Lulu', 'Lux', 'Maokai', 'Milio', 'Morgana', 'Nami', 'Nautilus', 'Pyke', 'Rakan', 'Rell', 'Renata', 'Senna', 'Seraphine', 'Sona', 'Soraka', 'Swain', 'TahmKench', 'Taric', 'Thresh', 'VelKoz', 'Xerath', 'Yuumi', 'Zilean', 'Zyra']
+    'Top': ['Ambessa','Aatrox', 'Camille', 'Darius', 'Fiora', 'Garen', 'Gnar', 'Illaoi', 'Irelia', 'Jax', 'Jayce', 'KSante', 'Kennen', 'Kled', 'Malphite', 'Mordekaiser', 'Nasus', 'Ornn', 'Pantheon', 'Poppy', 'Renekton', 'Riven', 'Rumble', 'Sett', 'Shen', 'Sion', 'Teemo', 'Tryndamere', 'Urgot', 'Volibear', 'Yone', 'Yorick','Zaahen'],
+    'Jungle': ['Ambessa','Amumu', 'BelVeth', 'Briar', 'Diana', 'Ekko', 'Elise', 'Evelynn', 'Fiddlesticks', 'Gragas', 'Graves', 'Hecarim', 'JarvanIV', 'Karthus', 'Kayn', 'KhaZix', 'Kindred', 'LeeSin', 'Lillia', 'MasterYi', 'Nidalee', 'Nocturne', 'Nunu', 'Rammus', 'Rengar', 'Sejuani', 'Shaco', 'Viego', 'Vi', 'Warwick', 'XinZhao', 'Zac','Zaahen'],
+    'Mid': ['Aurora','Mel','Ahri', 'Akali', 'Anivia', 'Annie', 'AurelionSol', 'Azir', 'Cassiopeia', 'Corki', 'Fizz', 'Galio', 'Hwei', 'Irelia', 'Kassadin', 'Katarina', 'LeBlanc', 'Lissandra', 'Lux', 'Malzahar', 'Naafiri', 'Neeko', 'Orianna', 'Qiyana', 'Ryze', 'Sylas', 'Syndra', 'Talon', 'TwistedFate', 'Veigar', 'Vex', 'Viktor', 'Vladimir', 'Xerath', 'Yasuo', 'Yone', 'Zed', 'Zoe'],
+    'ADC': ['Mel','Aphelios', 'Ashe', 'Caitlyn', 'Draven', 'Ezreal', 'Jhin', 'Jinx', 'KaiSa', 'Kalista', 'KogMaw', 'Lucian', 'MissFortune', 'Nilah', 'Samira', 'Sivir', 'Smolder', 'Tristana', 'Twitch', 'Varus', 'Vayne', 'Xayah', 'Zeri', 'Ziggs','Yunara'],
+    'Support': ['Mel','Alistar', 'Bard', 'Blitzcrank', 'Braum', 'Janna', 'Karma', 'Leona', 'Lulu', 'Lux', 'Maokai', 'Milio', 'Morgana', 'Nami', 'Nautilus', 'Pyke', 'Rakan', 'Rell', 'Renata', 'Senna', 'Seraphine', 'Sona', 'Soraka', 'Swain', 'TahmKench', 'Taric', 'Thresh', 'VelKoz', 'Xerath', 'Yuumi', 'Zilean', 'Zyra']
 };
 
 // --- RIOT DATA DRAGON ---
