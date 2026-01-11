@@ -1037,108 +1037,112 @@ async function handleMessageCommand(message) {
 
     // AUTOFILL SYSTEM WITH PREFERENCES
     if (content.startsWith('lol autofill')) {
-        const isChampsMode = content.includes('champs');
-        
-        // Regex to match users and their following text
-        // Looks for <@123> or <@!123> (Discord mentions)
-        const mentionRegex = /<@!?(\d+)>/g;
-        let match;
-        const usersWithPrefs = [];
-        const foundUserIds = new Set();
-        
-        // Iterate through all mentions in the message
-        while ((match = mentionRegex.exec(message.content)) !== null) {
-            const userId = match[1];
-            if (foundUserIds.has(userId)) continue; // avoid duplicates
+        try {
+            const isChampsMode = content.includes('champs');
             
-            foundUserIds.add(userId);
+            // Regex to match users and their following text
+            // Looks for <@123> or <@!123> (Discord mentions)
+            const mentionRegex = /<@!?(\d+)>/g;
+            let match;
+            const usersWithPrefs = [];
+            const foundUserIds = new Set();
             
-            // Get text from end of this mention to start of next mention (or end of string)
-            const startIndex = match.index + match[0].length;
-            const nextMatch = message.content.substring(startIndex).match(/<@!?(\d+)>/);
-            const endIndex = nextMatch ? startIndex + nextMatch.index : message.content.length;
-            
-            const rawText = message.content.substring(startIndex, endIndex);
-            const prefs = parseRoles(rawText); // Extract roles like 'jungle', 'supp'
-            
-            usersWithPrefs.push({ userId: userId, prefs: prefs });
-        }
-
-        if (usersWithPrefs.length === 0) {
-            return message.reply('❌ Please mention at least one user! (e.g., `lol autofill @user jungle`)');
-        }
-        if (usersWithPrefs.length > 5) {
-            return message.reply('❌ Max 5 players allowed for autofill!');
-        }
-
-        // Assignment Logic
-        const assignedRoles = new Map();
-        const takenRoles = new Set();
-        const allRoles = ['Top', 'Jungle', 'Mid', 'ADC', 'Support'];
-
-        // Shuffle users to keep fairness in priority
-        const shuffledUsers = shuffleArray(usersWithPrefs);
-
-        // First pass: Try to assign preferences
-        for (const user of shuffledUsers) {
-            // Filter preferences that are not taken yet
-            // Note: If < 5 players, "taken" only matters if we want unique roles. 
-            // Standard autofill implies unique roles for the team being built.
-            const validPrefs = user.prefs.filter(r => !takenRoles.has(r));
-            
-            if (validPrefs.length > 0) {
-                // Pick random valid preference
-                const picked = validPrefs[Math.floor(Math.random() * validPrefs.length)];
-                assignedRoles.set(user.userId, picked);
-                takenRoles.add(picked);
-            }
-        }
-
-        // Second pass: Assign remaining users (Autofill)
-        for (const user of shuffledUsers) {
-            if (!assignedRoles.has(user.userId)) {
-                // Find roles that are NOT taken
-                const available = allRoles.filter(r => !takenRoles.has(r));
+            // Iterate through all mentions in the message
+            while ((match = mentionRegex.exec(message.content)) !== null) {
+                const userId = match[1];
+                if (foundUserIds.has(userId)) continue; // avoid duplicates
                 
-                // If we have 5 players, we must fill all roles unique.
-                // If < 5 players, we just pick from what's left to maintain uniqueness for the group.
-                if (available.length > 0) {
-                    const picked = available[Math.floor(Math.random() * available.length)];
+                foundUserIds.add(userId);
+                
+                // Get text from end of this mention to start of next mention (or end of string)
+                const startIndex = match.index + match[0].length;
+                const nextMatch = message.content.substring(startIndex).match(/<@!?(\d+)>/);
+                const endIndex = nextMatch ? startIndex + nextMatch.index : message.content.length;
+                
+                const rawText = message.content.substring(startIndex, endIndex);
+                const prefs = parseRoles(rawText); // Extract roles like 'jungle', 'supp'
+                
+                usersWithPrefs.push({ userId: userId, prefs: prefs });
+            }
+
+            if (usersWithPrefs.length === 0) {
+                await message.reply('❌ Please mention at least one user! (e.g., `lol autofill @user jungle`)');
+                return;
+            }
+            if (usersWithPrefs.length > 5) {
+                await message.reply('❌ Max 5 players allowed for autofill!');
+                return;
+            }
+
+            // Assignment Logic
+            const assignedRoles = new Map();
+            const takenRoles = new Set();
+            const allRoles = ['Top', 'Jungle', 'Mid', 'ADC', 'Support'];
+
+            // Shuffle users to keep fairness in priority
+            const shuffledUsers = shuffleArray(usersWithPrefs);
+
+            // First pass: Try to assign preferences
+            for (const user of shuffledUsers) {
+                // Filter preferences that are not taken yet (or allow overlap if strictness not required)
+                // For autofill, we usually want unique roles.
+                const validPrefs = user.prefs.filter(r => !takenRoles.has(r));
+                
+                if (validPrefs.length > 0) {
+                    // Pick random valid preference
+                    const picked = validPrefs[Math.floor(Math.random() * validPrefs.length)];
                     assignedRoles.set(user.userId, picked);
                     takenRoles.add(picked);
-                } else {
-                    // Fallback (Shouldn't happen if max 5 users and 5 roles)
-                    assignedRoles.set(user.userId, 'Fill'); 
                 }
             }
-        }
 
-        // Build Response
-        let desc = '';
-        assignedRoles.forEach((role, userId) => {
-            const roleEmoji = ROLE_EMOJIS[role] || '🎲';
-            let entry = `${roleEmoji} **${role}:** <@${userId}>`;
-
-            if (isChampsMode && role !== 'Fill') {
-                const possibleChamps = ROLE_CHAMPIONS[role];
-                const champName = possibleChamps ? possibleChamps[Math.floor(Math.random() * possibleChamps.length)] : 'Random';
-                entry = `${roleEmoji} **${role}:** <@${userId}> playing **${champName}**`;
+            // Second pass: Assign remaining users (Autofill)
+            for (const user of shuffledUsers) {
+                if (!assignedRoles.has(user.userId)) {
+                    // Find roles that are NOT taken
+                    const available = allRoles.filter(r => !takenRoles.has(r));
+                    
+                    if (available.length > 0) {
+                        const picked = available[Math.floor(Math.random() * available.length)];
+                        assignedRoles.set(user.userId, picked);
+                        takenRoles.add(picked);
+                    } else {
+                        // Fallback (fill)
+                        assignedRoles.set(user.userId, 'Fill'); 
+                    }
+                }
             }
-            desc += `${entry}\n`;
-        });
 
-        // Add note if < 5 players about uniqueness
-        const footer = usersWithPrefs.length < 5 ? 'assigned unique roles from available pool' : 'Full team assigned!';
+            // Build Response
+            let desc = '';
+            assignedRoles.forEach((role, userId) => {
+                const roleEmoji = ROLE_EMOJIS[role] || '🎲';
+                let entry = `${roleEmoji} **${role}:** <@${userId}>`;
 
-        const embed = new EmbedBuilder()
-            .setTitle(isChampsMode ? '🎲 Autofill with Champions' : '🎲 Autofill Roles')
-            .setDescription(desc)
-            .setColor('#E91E63')
-            .setFooter({ text: footer })
-            .setTimestamp();
+                if (isChampsMode && role !== 'Fill') {
+                    // Explicitly pick a champion for the assigned role
+                    const possibleChamps = ROLE_CHAMPIONS[role];
+                    const champName = possibleChamps ? possibleChamps[Math.floor(Math.random() * possibleChamps.length)] : 'Random';
+                    entry = `${roleEmoji} **${role}:** <@${userId}> playing **${champName}**`;
+                }
+                desc += `${entry}\n`;
+            });
 
-        await message.reply({ embeds: [embed] });
-        return;
+            const footer = usersWithPrefs.length < 5 ? 'assigned unique roles from available pool' : 'Full team assigned!';
+
+            const embed = new EmbedBuilder()
+                .setTitle(isChampsMode ? '🎲 Autofill with Champions' : '🎲 Autofill Roles')
+                .setDescription(desc)
+                .setColor('#E91E63')
+                .setFooter({ text: footer })
+                .setTimestamp();
+
+            await message.reply({ embeds: [embed] });
+        } catch (error) {
+            console.error("Autofill Error:", error);
+            // Prevent double response on error by doing nothing or a console log
+        }
+        return; // Explicit return to prevent fall-through
     }
 
     // BUY CHAMPION
