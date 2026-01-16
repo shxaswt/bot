@@ -51,6 +51,8 @@ const playerSchema = new mongoose.Schema({
     ownedChampions: { type: Array, default: [] },
     ownedSkins: { type: Array, default: [] },
     lastDaily: { type: Number, default: 0 },
+    // Persist the last mass chest opening results here
+    lastLootSession: { type: Array, default: [] }, 
     // Hint Timestamps
     lastHint: { type: Number, default: 0 }, 
     lastMeow: { type: Number, default: 0 }, 
@@ -64,7 +66,6 @@ const Player = mongoose.model('Player', playerSchema);
 const activeGames = new Map();
 const serverCooldowns = new Map();
 const pendingTrades = new Map();
-const lootSessionCache = new Map(); // Stores the results of "Open All" for pagination
 
 // --- CONFIG & CONSTANTS ---
 const RARITIES = {
@@ -159,11 +160,19 @@ async function loadChampionData() {
 
 async function getChampionDetails(championKey) {
     try {
+        // Simple caching mechanism for details
+        if (championSkins[championKey] && championSkins[championKey].fullData) {
+            return championSkins[championKey].fullData;
+        }
+
         const response = await axios.get(`${DD_BASE}/data/en_US/champion/${championKey}.json`);
         const details = response.data.data[championKey];
+        
         if (!championSkins[championKey]) {
             championSkins[championKey] = details.skins;
         }
+        championSkins[championKey].fullData = details; // cache full details
+        
         return details;
     } catch (error) {
         return null;
@@ -285,16 +294,16 @@ async function processImage(imageUrl, mode, difficulty, pixelate = false) {
             const cropY = Math.floor(Math.random() * maxY);
             ctx.drawImage(image, cropX, cropY, cropSize, cropSize, 0, 0, 400, 400);
             if (pixelate) {
-                const pixelSizes = { easy: 5, normal: 8, hard: 12 };
-                pixelateImage(canvas, ctx, canvas, pixelSizes[difficulty] || 8);
+                const pixelSizes = { easy: 8, normal: 12, hard: 16 };
+                pixelateImage(canvas, ctx, canvas, pixelSizes[difficulty] || 10);
             }
             return canvas.toBuffer();
         } else if (mode === 'ability' && pixelate) {
             const canvas = Canvas.createCanvas(image.width, image.height);
             const ctx = canvas.getContext('2d');
             ctx.drawImage(image, 0, 0);
-            const pixelSizes = { easy: 4, normal: 8, hard: 12, v2: 6, v3: 6 };
-            pixelateImage(canvas, ctx, canvas, pixelSizes[difficulty] || 6);
+            const pixelSizes = { easy: 5, normal: 7.5, hard: 12, v2: 8, v3: 8 };
+            pixelateImage(canvas, ctx, canvas, pixelSizes[difficulty] || 8);
             return canvas.toBuffer();
         }
         return null;
@@ -902,7 +911,7 @@ async function generateLootItem() {
         
         if (champDetails && champDetails.skins.length > 0) {
             const skins = champDetails.skins.filter(s => s.num !== 0);
-            if (skins.length === 0) return generateLootItem(); // Recursion if no skins
+            if (skins.length === 0) return generateLootItem(); 
             
             const randomSkin = skins[Math.floor(Math.random() * skins.length)];
             
@@ -948,6 +957,7 @@ async function openChest(userId) {
     return loot;
 }
 
+// Optimized Mass Open: Updates array in memory then 1 save operation
 async function openAllChests(userId) {
     const player = await Player.findOne({ userId });
     if (!player || player.chests < 1) {
@@ -957,7 +967,6 @@ async function openAllChests(userId) {
     const chestCount = player.chests;
     const lootLog = [];
     
-    // Loop through logic without saving every iteration
     for(let i = 0; i < chestCount; i++) {
         const loot = await generateLootItem();
         lootLog.push(loot);
@@ -969,20 +978,19 @@ async function openAllChests(userId) {
     }
     
     player.chests = 0;
+    // Save this specific session to DB so it persists without time limit
+    player.lastLootSession = lootLog;
     await player.save();
-    
-    // Save to cache for button navigation
-    lootSessionCache.set(userId, lootLog);
-    
-    // Clear cache after 15 mins to save memory
-    setTimeout(() => {
-        if(lootSessionCache.has(userId)) lootSessionCache.delete(userId);
-    }, 15 * 60 * 1000);
     
     return lootLog;
 }
 
 function createLootEmbed(lootArray, index, total, userId) {
+    // If user tries to access index out of bounds (shouldn't happen with buttons disabled)
+    if (!lootArray || index < 0 || index >= lootArray.length) {
+        return new EmbedBuilder().setDescription('❌ Error loading loot item.').setColor('#ff0000');
+    }
+
     const loot = lootArray[index];
     const embed = new EmbedBuilder()
         .setTitle(`💥 Opened ${total} Chests!`)
@@ -1840,14 +1848,16 @@ client.on('interactionCreate', async (interaction) => {
             const player = await Player.findOne({ userId: interaction.user.id });
             if (!player) return interaction.reply({ content: '❌ No data!', flags: MessageFlags.Ephemeral });
             
-            // LOOT PAGINATION (New)
+            // LOOT PAGINATION (DB Persistent)
             if (customId.startsWith('loot_')) {
                 const direction = parts[1];
                 const currentIndex = parseInt(parts[2]);
-                const lootLog = lootSessionCache.get(interaction.user.id);
                 
-                if (!lootLog) {
-                    return interaction.reply({ content: '❌ Session expired! You received the items, but cannot view the log anymore.', flags: MessageFlags.Ephemeral });
+                // Read from Persistent DB Storage instead of temporary Cache
+                const lootLog = player.lastLootSession;
+                
+                if (!lootLog || lootLog.length === 0) {
+                    return interaction.reply({ content: '❌ No active loot session found in database.', flags: MessageFlags.Ephemeral });
                 }
 
                 const newIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
