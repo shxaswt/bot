@@ -64,6 +64,7 @@ const Player = mongoose.model('Player', playerSchema);
 const activeGames = new Map();
 const serverCooldowns = new Map();
 const pendingTrades = new Map();
+const lootSessionCache = new Map(); // Stores the results of "Open All" for pagination
 
 // --- CONFIG & CONSTANTS ---
 const RARITIES = {
@@ -115,7 +116,7 @@ const ROLE_ALIASES = {
     'support': 'Support', 'sup': 'Support', 'supp': 'Support', 'sp': 'Support'
 };
 
-// Curated list to ensure "Respect the champs that have to play each role"
+// Curated list
 const ROLE_CHAMPIONS = {
     'Top': ['Ambessa','Aatrox', 'Camille', 'Darius', 'Fiora', 'Garen', 'Gnar', 'Illaoi', 'Irelia', 'Jax', 'Jayce', 'KSante', 'Kennen', 'Kled', 'Malphite', 'Mordekaiser', 'Nasus', 'Ornn', 'Pantheon', 'Poppy', 'Renekton', 'Riven', 'Rumble', 'Sett', 'Shen', 'Sion', 'Teemo', 'Tryndamere', 'Urgot', 'Volibear', 'Yone', 'Yorick','Zaahen'],
     'Jungle': ['Ambessa','Amumu', 'BelVeth', 'Briar', 'Diana', 'Ekko', 'Elise', 'Evelynn', 'Fiddlesticks', 'Gragas', 'Graves', 'Hecarim', 'JarvanIV', 'Karthus', 'Kayn', 'KhaZix', 'Kindred', 'LeeSin', 'Lillia', 'MasterYi', 'Nidalee', 'Nocturne', 'Nunu', 'Rammus', 'Rengar', 'Sejuani', 'Shaco', 'Viego', 'Vi', 'Warwick', 'XinZhao', 'Zac','Zaahen'],
@@ -201,7 +202,7 @@ function shuffleArray(array) {
 }
 
 function parseRoles(text) {
-    const words = text.split(/[\s,]+/); // Split by space or comma
+    const words = text.split(/[\s,]+/); 
     const foundRoles = new Set();
     words.forEach(w => {
         const clean = w.toLowerCase().trim();
@@ -275,8 +276,8 @@ async function processImage(imageUrl, mode, difficulty, pixelate = false) {
         if (mode === 'splash' || mode === 'skin') {
             const canvas = Canvas.createCanvas(400, 400);
             const ctx = canvas.getContext('2d');
-            const zoomLevels = { easy: 2.5, normal: 4.0, hard: 6.0 };
-            const zoom = zoomLevels[difficulty] || 4.0;
+            const zoomLevels = { easy: 1.5, normal: 3.0, hard: 4.5 };
+            const zoom = zoomLevels[difficulty] || 3.0;
             const cropSize = Math.min(image.width, image.height) / zoom;
             const maxX = Math.max(0, image.width - cropSize);
             const maxY = Math.max(0, image.height - cropSize);
@@ -284,16 +285,16 @@ async function processImage(imageUrl, mode, difficulty, pixelate = false) {
             const cropY = Math.floor(Math.random() * maxY);
             ctx.drawImage(image, cropX, cropY, cropSize, cropSize, 0, 0, 400, 400);
             if (pixelate) {
-                const pixelSizes = { easy: 10, normal: 14, hard: 18 };
-                pixelateImage(canvas, ctx, canvas, pixelSizes[difficulty] || 14);
+                const pixelSizes = { easy: 5, normal: 8, hard: 12 };
+                pixelateImage(canvas, ctx, canvas, pixelSizes[difficulty] || 8);
             }
             return canvas.toBuffer();
         } else if (mode === 'ability' && pixelate) {
             const canvas = Canvas.createCanvas(image.width, image.height);
             const ctx = canvas.getContext('2d');
             ctx.drawImage(image, 0, 0);
-            const pixelSizes = { easy: 8, normal: 12, hard: 16, v2: 12, v3: 12 };
-            pixelateImage(canvas, ctx, canvas, pixelSizes[difficulty] || 12);
+            const pixelSizes = { easy: 4, normal: 8, hard: 12, v2: 6, v3: 6 };
+            pixelateImage(canvas, ctx, canvas, pixelSizes[difficulty] || 6);
             return canvas.toBuffer();
         }
         return null;
@@ -875,14 +876,7 @@ async function declineTrade(interaction, tradeId) {
 }
 
 // --- CHESTS & DAILY ---
-async function openChest(userId) {
-    const player = await Player.findOne({ userId });
-    if (!player || player.chests < 1) {
-        return null;
-    }
-    
-    player.chests -= 1;
-    
+async function generateLootItem() {
     const isChampion = Math.random() < 0.4;
     
     if (isChampion) {
@@ -893,22 +887,22 @@ async function openChest(userId) {
         const beCost = beValues[Math.floor(Math.random() * beValues.length)];
         const upgradeCost = CHAMPION_COSTS[beCost].upgrade;
         
-        player.championShards.push({
-            id: randomChamp,
-            name: champInfo.name,
-            beCost: upgradeCost,
-            storePrice: beCost
-        });
-        
-        await player.save();
-        return { type: 'champion', data: player.championShards[player.championShards.length - 1] };
+        return { 
+            type: 'champion', 
+            data: {
+                id: randomChamp,
+                name: champInfo.name,
+                beCost: upgradeCost,
+                storePrice: beCost
+            }
+        };
     } else {
         const randomChamp = championList[Math.floor(Math.random() * championList.length)];
         const champDetails = await getChampionDetails(randomChamp);
         
         if (champDetails && champDetails.skins.length > 0) {
             const skins = champDetails.skins.filter(s => s.num !== 0);
-            if (skins.length === 0) return openChest(userId);
+            if (skins.length === 0) return generateLootItem(); // Recursion if no skins
             
             const randomSkin = skins[Math.floor(Math.random() * skins.length)];
             
@@ -919,21 +913,111 @@ async function openChest(userId) {
             else if (rarityRoll < 0.97) rarity = 'LEGENDARY';
             else rarity = 'ULTIMATE';
             
-            const skinShard = {
-                id: `${randomChamp}_${randomSkin.num}`,
-                championId: randomChamp,
-                championName: champDetails.name,
-                skinName: randomSkin.name,
-                skinNum: randomSkin.num,
-                rarity: rarity
+            return {
+                type: 'skin', 
+                data: {
+                    id: `${randomChamp}_${randomSkin.num}`,
+                    championId: randomChamp,
+                    championName: champDetails.name,
+                    skinName: randomSkin.name,
+                    skinNum: randomSkin.num,
+                    rarity: rarity
+                }
             };
-            
-            player.skinShards.push(skinShard);
-            await player.save();
-            return { type: 'skin', data: skinShard };
+        }
+        return generateLootItem(); // Recursion retry
+    }
+}
+
+async function openChest(userId) {
+    const player = await Player.findOne({ userId });
+    if (!player || player.chests < 1) {
+        return null;
+    }
+    
+    const loot = await generateLootItem();
+    player.chests -= 1;
+    
+    if (loot.type === 'champion') {
+        player.championShards.push(loot.data);
+    } else {
+        player.skinShards.push(loot.data);
+    }
+    
+    await player.save();
+    return loot;
+}
+
+async function openAllChests(userId) {
+    const player = await Player.findOne({ userId });
+    if (!player || player.chests < 1) {
+        return null;
+    }
+    
+    const chestCount = player.chests;
+    const lootLog = [];
+    
+    // Loop through logic without saving every iteration
+    for(let i = 0; i < chestCount; i++) {
+        const loot = await generateLootItem();
+        lootLog.push(loot);
+        if (loot.type === 'champion') {
+            player.championShards.push(loot.data);
+        } else {
+            player.skinShards.push(loot.data);
         }
     }
-    return null;
+    
+    player.chests = 0;
+    await player.save();
+    
+    // Save to cache for button navigation
+    lootSessionCache.set(userId, lootLog);
+    
+    // Clear cache after 15 mins to save memory
+    setTimeout(() => {
+        if(lootSessionCache.has(userId)) lootSessionCache.delete(userId);
+    }, 15 * 60 * 1000);
+    
+    return lootLog;
+}
+
+function createLootEmbed(lootArray, index, total, userId) {
+    const loot = lootArray[index];
+    const embed = new EmbedBuilder()
+        .setTitle(`💥 Opened ${total} Chests!`)
+        .setFooter({ text: `Loot ${index + 1}/${total} | All items added to inventory` });
+
+    if (loot.type === 'champion') {
+        const iconUrl = getChampionIconUrl(loot.data.id);
+        embed.setDescription(`## Champion Shard\n**${loot.data.name}**\n💎 ${loot.data.beCost} BE to unlock`);
+        embed.setThumbnail(iconUrl);
+        embed.setColor('#0099ff');
+    } else {
+        const rarity = RARITIES[loot.data.rarity];
+        const skinUrl = getSkinCenteredUrl(loot.data.championId, loot.data.skinNum);
+        embed.setDescription(`## Skin Shard (${rarity.name})\n**${loot.data.championName} - ${loot.data.skinName}**\n🔶 ${rarity.craftCost} OE to unlock`);
+        embed.setColor(rarity.color);
+        embed.setImage(skinUrl);
+    }
+    
+    return embed;
+}
+
+function createLootButtons(currentIndex, totalCount, userId) {
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`loot_prev_${currentIndex}_${userId}`)
+            .setLabel('◀️ Previous')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(currentIndex <= 0),
+        new ButtonBuilder()
+            .setCustomId(`loot_next_${currentIndex}_${userId}`)
+            .setLabel('Next ▶️')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(currentIndex >= totalCount - 1)
+    );
+    return row;
 }
 
 async function claimDaily(userId, username) {
@@ -1040,27 +1124,23 @@ async function handleMessageCommand(message) {
         try {
             const isChampsMode = content.includes('champs');
             
-            // Regex to match users and their following text
-            // Looks for <@123> or <@!123> (Discord mentions)
             const mentionRegex = /<@!?(\d+)>/g;
             let match;
             const usersWithPrefs = [];
             const foundUserIds = new Set();
             
-            // Iterate through all mentions in the message
             while ((match = mentionRegex.exec(message.content)) !== null) {
                 const userId = match[1];
-                if (foundUserIds.has(userId)) continue; // avoid duplicates
+                if (foundUserIds.has(userId)) continue; 
                 
                 foundUserIds.add(userId);
                 
-                // Get text from end of this mention to start of next mention (or end of string)
                 const startIndex = match.index + match[0].length;
                 const nextMatch = message.content.substring(startIndex).match(/<@!?(\d+)>/);
                 const endIndex = nextMatch ? startIndex + nextMatch.index : message.content.length;
                 
                 const rawText = message.content.substring(startIndex, endIndex);
-                const prefs = parseRoles(rawText); // Extract roles like 'jungle', 'supp'
+                const prefs = parseRoles(rawText); 
                 
                 usersWithPrefs.push({ userId: userId, prefs: prefs });
             }
@@ -1074,32 +1154,24 @@ async function handleMessageCommand(message) {
                 return;
             }
 
-            // Assignment Logic
             const assignedRoles = new Map();
             const takenRoles = new Set();
             const allRoles = ['Top', 'Jungle', 'Mid', 'ADC', 'Support'];
 
-            // Shuffle users to keep fairness in priority
             const shuffledUsers = shuffleArray(usersWithPrefs);
 
-            // First pass: Try to assign preferences
             for (const user of shuffledUsers) {
-                // Filter preferences that are not taken yet (or allow overlap if strictness not required)
-                // For autofill, we usually want unique roles.
                 const validPrefs = user.prefs.filter(r => !takenRoles.has(r));
                 
                 if (validPrefs.length > 0) {
-                    // Pick random valid preference
                     const picked = validPrefs[Math.floor(Math.random() * validPrefs.length)];
                     assignedRoles.set(user.userId, picked);
                     takenRoles.add(picked);
                 }
             }
 
-            // Second pass: Assign remaining users (Autofill)
             for (const user of shuffledUsers) {
                 if (!assignedRoles.has(user.userId)) {
-                    // Find roles that are NOT taken
                     const available = allRoles.filter(r => !takenRoles.has(r));
                     
                     if (available.length > 0) {
@@ -1107,20 +1179,17 @@ async function handleMessageCommand(message) {
                         assignedRoles.set(user.userId, picked);
                         takenRoles.add(picked);
                     } else {
-                        // Fallback (fill)
                         assignedRoles.set(user.userId, 'Fill'); 
                     }
                 }
             }
 
-            // Build Response
             let desc = '';
             assignedRoles.forEach((role, userId) => {
                 const roleEmoji = ROLE_EMOJIS[role] || '🎲';
                 let entry = `${roleEmoji} **${role}:** <@${userId}>`;
 
                 if (isChampsMode && role !== 'Fill') {
-                    // Explicitly pick a champion for the assigned role
                     const possibleChamps = ROLE_CHAMPIONS[role];
                     const champName = possibleChamps ? possibleChamps[Math.floor(Math.random() * possibleChamps.length)] : 'Random';
                     entry = `${roleEmoji} **${role}:** <@${userId}> playing **${champName}**`;
@@ -1140,9 +1209,8 @@ async function handleMessageCommand(message) {
             await message.reply({ embeds: [embed] });
         } catch (error) {
             console.error("Autofill Error:", error);
-            // Prevent double response on error by doing nothing or a console log
         }
-        return; // Explicit return to prevent fall-through
+        return; 
     }
 
     // BUY CHAMPION
@@ -1200,8 +1268,24 @@ async function handleMessageCommand(message) {
         await message.reply({ embeds: [new EmbedBuilder().setTitle('🎁 Daily Reward!').setDescription(result.rewards.join('\n')).setColor('#FFD700')] });
         return;
     }
+
+    // OPEN CHEST ALL (New Feature)
+    if (content === 'lol oc all' || content === 'lol open chest all') {
+        const player = await initPlayer(message.author.id, message.author.username);
+        if (player.chests < 1) return message.reply('❌ No chests to open!');
+
+        const lootLog = await openAllChests(message.author.id);
+        if (!lootLog || lootLog.length === 0) return message.reply('❌ Error opening chests!');
+
+        const total = lootLog.length;
+        const embed = createLootEmbed(lootLog, 0, total, message.author.id);
+        const buttons = createLootButtons(0, total, message.author.id);
+
+        await message.reply({ embeds: [embed], components: [buttons] });
+        return;
+    }
     
-    // OPEN CHEST
+    // OPEN CHEST (Single)
     if (content === 'lol oc' || content === 'lol open chest') {
         const player = await initPlayer(message.author.id, message.author.username);
         if (player.chests < 1) return message.reply('❌ No chests!');
@@ -1269,7 +1353,7 @@ async function handleMessageCommand(message) {
             .addFields(
                 { name: '🎯 Games', value: '`lol ga [diff] [px]` - Guess ability\n`lol gsp [diff] [px]` - Guess splash\n`lol gsk [diff] [px]` - Guess skin\n\n**Difficulties:** `ez`, `mid`, `hard`, `v2`, `v3`\n**Pixelated:** Add `px` at end\n**Examples:** `lol ga v2`, `lol gsp hard px`' },
                 { name: '🎲 Autofill', value: '`lol autofill @u1 top @u2 mid support` - Assign roles with preference\n`lol autofill champs @u1...` - Assign roles & champs' },
-                { name: '💰 Economy', value: '`lol daily` - Daily reward\n`lol oc` - Open chest\n`lol inv` - View inventory' },
+                { name: '💰 Economy', value: '`lol daily` - Daily reward\n`lol oc` - Open one chest\n`lol oc all` - Open ALL chests\n`lol inv` - View inventory' },
                 { name: '🛍️ Store', value: '`lol store` - Browse champions\n`lol store buy <name>` - Buy champ' },
                 { name: '🔨 Crafting', value: '`lol craft skin <#>` - Unlock skin\n`lol craft champ <#>` - Unlock champion\n`lol de <#>` - Disenchant skin\n`lol reroll <#> <#> <#>` - Reroll 3 skins' },
                 { name: '🔄 Trading', value: '`lol trade @user <your#> <their#>` - Trade skins\n`lol trade champ @user <your#> <their#>` - Trade champs\nExample: `lol trade @momo 1 4`\nTrades expire in 5 minutes' },
@@ -1756,6 +1840,24 @@ client.on('interactionCreate', async (interaction) => {
             const player = await Player.findOne({ userId: interaction.user.id });
             if (!player) return interaction.reply({ content: '❌ No data!', flags: MessageFlags.Ephemeral });
             
+            // LOOT PAGINATION (New)
+            if (customId.startsWith('loot_')) {
+                const direction = parts[1];
+                const currentIndex = parseInt(parts[2]);
+                const lootLog = lootSessionCache.get(interaction.user.id);
+                
+                if (!lootLog) {
+                    return interaction.reply({ content: '❌ Session expired! You received the items, but cannot view the log anymore.', flags: MessageFlags.Ephemeral });
+                }
+
+                const newIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
+                const embed = createLootEmbed(lootLog, newIndex, lootLog.length, interaction.user.id);
+                const buttons = createLootButtons(newIndex, lootLog.length, interaction.user.id);
+                
+                await interaction.update({ embeds: [embed], components: [buttons] });
+                return;
+            }
+
             if (customId.startsWith('store_')) {
                 const direction = parts[1];
                 const currentPage = parseInt(parts[2]);
