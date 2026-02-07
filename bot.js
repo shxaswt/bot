@@ -1606,6 +1606,14 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 client.on('interactionCreate', async (interaction) => {
+      // === DEBUG LOGGING - ADD THIS ===
+    console.log(📥 INTERACTION RECEIVED at ${new Date().toISOString()});
+    console.log(   Type: ${interaction.type});
+    console.log(   User: ${interaction.user?.tag || 'Unknown'});
+    console.log(   Command: ${interaction.commandName || interaction.customId || 'N/A'});
+    console.log(   Channel: ${interaction.channel?.id || 'N/A'});
+    console.log(   Guild: ${interaction.guild?.id || 'DM'});
+    // === END DEBUG ===
     try {
         if (interaction.isChatInputCommand()) {
             const { commandName, options } = interaction;
