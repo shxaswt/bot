@@ -35,6 +35,19 @@ mongoose.connect(process.env.MONGODB_URI)
         process.exit(1);
     });
 
+// Monitor MongoDB connection
+mongoose.connection.on('disconnected', () => {
+    console.error('⚠️ MongoDB disconnected! Attempting to reconnect...');
+});
+
+mongoose.connection.on('reconnected', () => {
+    console.log('✅ MongoDB reconnected successfully');
+});
+
+mongoose.connection.on('error', (err) => {
+    console.error('❌ MongoDB error:', err);
+});
+
 // --- SCHEMA DEFINITION ---
 const playerSchema = new mongoose.Schema({
     userId: { type: String, required: true, unique: true },
@@ -1606,17 +1619,15 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 client.on('interactionCreate', async (interaction) => {
-      // === DEBUG LOGGING - ADD THIS ===
-    console.log(📥 INTERACTION RECEIVED at ${new Date().toISOString()});
-    console.log(   Type: ${interaction.type});
-    console.log(   User: ${interaction.user?.tag || 'Unknown'});
-    console.log(   Command: ${interaction.commandName || interaction.customId || 'N/A'});
-    console.log(   Channel: ${interaction.channel?.id || 'N/A'});
-    console.log(   Guild: ${interaction.guild?.id || 'DM'});
-    // === END DEBUG ===
+    // DEBUG LOGGING
+    console.log(`[INTERACTION] Received at ${new Date().toISOString()}`);
+    console.log(`[INTERACTION] Type: ${interaction.type}, Command: ${interaction.commandName || interaction.customId || 'N/A'}`);
+    console.log(`[INTERACTION] User: ${interaction.user?.tag || 'Unknown'}, Guild: ${interaction.guild?.id || 'DM'}`);
+    
     try {
         if (interaction.isChatInputCommand()) {
             const { commandName, options } = interaction;
+            console.log(`[COMMAND] Processing: /${commandName}`);
 
             // HINT COMMANDS
             if (['meow', 'uwu', '7u7'].includes(commandName)) {
