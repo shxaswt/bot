@@ -1,16 +1,18 @@
 {
-  "name": "lol-guessing-bot",
-  "version": "2.0.0",
+  "name": "discord-bot-koyeb",
+  "version": "1.0.0",
   "main": "bot.js",
   "scripts": {
-    "start": "node bot.js",
-    "migrate": "node migrate.js"
+    "start": "node bot.js"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "mongoose": "^8.1.0",
-    "axios": "^1.6.5",
+    "discord.js": "^14.14.0",
+    "mongoose": "^8.0.0",
+    "axios": "^1.6.0",
     "canvas": "^2.11.2",
     "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
