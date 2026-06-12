@@ -208,12 +208,16 @@ function getNumericChampionKey(key) {
 
 function getSkinSplashUrl(championKey, skinNum) {
     const id = getNumericChampionKey(championKey);
-    return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-splashes/${id}/${id}-${skinNum}.jpg`;
+    // CDragon filenames use the full skin ID: champId*1000 + skinNum
+    // e.g. Ahri (103) skin 1 → 103001.jpg, Amumu (33) skin 7 → 33007.jpg
+    const fullSkinId = parseInt(id) * 1000 + parseInt(skinNum);
+    return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-splashes/${id}/${fullSkinId}.jpg`;
 }
 
 function getSkinCenteredUrl(championKey, skinNum) {
     const id = getNumericChampionKey(championKey);
-    return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-tiles/${id}/${id}-${skinNum}.jpg`;
+    const fullSkinId = parseInt(id) * 1000 + parseInt(skinNum);
+    return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-tiles/${id}/${fullSkinId}.jpg`;
 }
 
 function getChampionPrice(championId) {
