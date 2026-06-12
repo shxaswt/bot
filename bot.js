@@ -254,12 +254,12 @@ function getSkinSplashUrl(championKey, skinNum) {
 }
 
 function getSkinCenteredUrl(championKey, skinNum) {
-    const indexKey = `${championKey}_${skinNum}`;
-    const entry = cdragonSkinByName[indexKey];
-    if (entry && entry.tileUrl) return entry.tileUrl;
-    const baseEntry = cdragonSkinByName[`${championKey}_0`];
-    if (baseEntry && baseEntry.tileUrl) return baseEntry.tileUrl;
-    return `https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${championKey}_${skinNum}.jpg`;
+    // Use CDragon loading screen art (portrait half-body, distinct from splash)
+    const name = championKey.toLowerCase();
+    if (skinNum === 0) {
+        return `${CDRAGON_BASE}/assets/characters/${name}/skins/base/${name}loadscreen.jpg`;
+    }
+    return `${CDRAGON_BASE}/assets/characters/${name}/skins/skin${skinNum}/${name}loadscreen_${skinNum}.jpg`;
 }
 
 function getChampionPrice(championId) {
