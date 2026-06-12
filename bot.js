@@ -411,10 +411,10 @@ async function getRandomContent(mode, difficulty, pixelate = false) {
     } else if (mode === 'skin') {
         const skins = champDetails.skins.filter(s => s.num !== 0);
         if (skins.length === 0) {
-            imageUrl = getSkinSplashUrl(randomChamp, 0);
+            imageUrl = getSkinCenteredUrl(randomChamp, 0);
         } else {
             const randomSkin = skins[Math.floor(Math.random() * skins.length)];
-            imageUrl = getSkinSplashUrl(randomChamp, randomSkin.num);
+            imageUrl = getSkinCenteredUrl(randomChamp, randomSkin.num);
         }
         processedImage = await processImage(imageUrl, mode, difficulty, pixelate);
     }
