@@ -25,6 +25,8 @@ const client = new Client({
     ]
 });
 
+
+
 // --- MONGODB CONNECTION ---
 mongoose.connect(process.env.MONGODB_URI)
     .then(() => console.log('✅ Connected to MongoDB Atlas'))
@@ -32,6 +34,19 @@ mongoose.connect(process.env.MONGODB_URI)
         console.error('❌ MongoDB Connection Error:', err);
         process.exit(1);
     });
+
+// Monitor MongoDB connection
+mongoose.connection.on('disconnected', () => {
+    console.error('⚠️ MongoDB disconnected! Attempting to reconnect...');
+});
+
+mongoose.connection.on('reconnected', () => {
+    console.log('✅ MongoDB reconnected successfully');
+});
+
+mongoose.connection.on('error', (err) => {
+    console.error('❌ MongoDB error:', err);
+});
 
 // --- SCHEMA DEFINITION ---
 const playerSchema = new mongoose.Schema({
@@ -126,12 +141,53 @@ const ROLE_CHAMPIONS = {
     'Support': ['Mel','Alistar', 'Bard', 'Blitzcrank', 'Braum', 'Janna', 'Karma', 'Leona', 'Lulu', 'Lux', 'Maokai', 'Milio', 'Morgana', 'Nami', 'Nautilus', 'Pyke', 'Rakan', 'Rell', 'Renata', 'Senna', 'Seraphine', 'Sona', 'Soraka', 'Swain', 'TahmKench', 'Taric', 'Thresh', 'VelKoz', 'Xerath', 'Yuumi', 'Zilean', 'Zyra']
 };
 
-// --- RIOT DATA DRAGON ---
+// --- RIOT DATA DRAGON + CDRAGON ---
 let DD_VERSION = '14.1.1';
 let DD_BASE = `https://ddragon.leagueoflegends.com/cdn/${DD_VERSION}`;
 let championData = null;
 let championList = [];
 let championSkins = {};
+
+const CDRAGON_BASE = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default';
+// Maps "ChampionKey_skinNum" (e.g. "Zeri_40") -> { splashUrl, tileUrl }
+let cdragonSkinByName = {};
+
+function cdragonAssetUrl(path) {
+    if (!path) return null;
+    const relative = path.replace('/lol-game-data/assets/', '').toLowerCase();
+    return `${CDRAGON_BASE}/${relative}`;
+}
+
+async function loadCDragonSkinIndex() {
+    try {
+        console.log('Loading CDragon skin index...');
+        const response = await axios.get(`${CDRAGON_BASE}/v1/skins.json`, { timeout: 20000 });
+        const skins = response.data;
+        const tempIndex = {};
+        for (const [numericId, skin] of Object.entries(skins)) {
+            const champNumericId = Math.floor(parseInt(numericId) / 1000);
+            const skinNum = parseInt(numericId) % 1000;
+            if (!tempIndex[champNumericId]) tempIndex[champNumericId] = {};
+            tempIndex[champNumericId][skinNum] = {
+                splashUrl: cdragonAssetUrl(skin.splashPath),
+                tileUrl: cdragonAssetUrl(skin.tilePath)
+            };
+        }
+        if (championData) {
+            for (const [champKey, champ] of Object.entries(championData)) {
+                const numId = parseInt(champ.key);
+                if (tempIndex[numId]) {
+                    for (const [skinNum, urls] of Object.entries(tempIndex[numId])) {
+                        cdragonSkinByName[`${champKey}_${skinNum}`] = urls;
+                    }
+                }
+            }
+        }
+        console.log(`✅ CDragon skin index built: ${Object.keys(cdragonSkinByName).length} entries`);
+    } catch (error) {
+        console.error('Failed to load CDragon skin index:', error.message);
+    }
+}
 
 async function getLatestVersion() {
     try {
@@ -151,8 +207,11 @@ async function loadChampionData() {
         const response = await axios.get(`${DD_BASE}/data/en_US/champion.json`);
         championData = response.data.data;
         championList = Object.keys(championData);
-        championList.sort(); 
+        championList.sort();
         console.log(`✅ Loaded ${championList.length} champions`);
+
+        // Load CDragon skin URLs after champion data is ready
+        await loadCDragonSkinIndex();
     } catch (error) {
         console.error('Error loading champion data:', error);
     }
@@ -184,10 +243,22 @@ function getChampionIconUrl(championKey) {
 }
 
 function getSkinSplashUrl(championKey, skinNum) {
+    const indexKey = `${championKey}_${skinNum}`;
+    const entry = cdragonSkinByName[indexKey];
+    if (entry && entry.splashUrl) return entry.splashUrl;
+    // fallback: base skin splash (skinNum 0) or try with 0
+    const baseEntry = cdragonSkinByName[`${championKey}_0`];
+    if (baseEntry && baseEntry.splashUrl) return baseEntry.splashUrl;
+    // last resort ddragon (may 403 in Discord but won't crash)
     return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${championKey}_${skinNum}.jpg`;
 }
 
 function getSkinCenteredUrl(championKey, skinNum) {
+    const indexKey = `${championKey}_${skinNum}`;
+    const entry = cdragonSkinByName[indexKey];
+    if (entry && entry.tileUrl) return entry.tileUrl;
+    const baseEntry = cdragonSkinByName[`${championKey}_0`];
+    if (baseEntry && baseEntry.tileUrl) return baseEntry.tileUrl;
     return `https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${championKey}_${skinNum}.jpg`;
 }
 
@@ -1543,17 +1614,76 @@ async function handleMessageCommand(message) {
 }
 
 // --- EVENTS ---
+let isReady = false;
+
 client.on('ready', async () => {
-    console.log(`✅ ${client.user.tag}`);
+    if (isReady) {
+        console.log('🔄 Bot reconnected after disconnect');
+        return;
+    }
+    
+    isReady = true;
+    console.log('='.repeat(50));
+    console.log(`✅ ${client.user.tag} is online!`);
+    console.log(`📅 ${new Date().toISOString()}`);
+    console.log(`🏓 Ping: ${client.ws.ping}ms`);
+    console.log(`📊 Guilds: ${client.guilds.cache.size}`);
+    console.log('='.repeat(50));
+    
     await loadChampionData();
     await registerCommands();
     console.log('🎮 Ready!');
 });
 
+// Handle disconnections
+client.on('shardDisconnect', (event) => {
+    console.log('⚠️ Discord disconnected:', event.code, event.reason);
+});
+
+client.on('shardReconnecting', () => {
+    console.log('🔄 Attempting to reconnect to Discord...');
+});
+
+client.on('shardResume', (replayed) => {
+    console.log(`✅ Connection resumed. Replayed ${replayed} events.`);
+});
+
+// Enhanced error handling
+client.on('error', (error) => {
+    console.error('❌ Discord client error:', error);
+    // Don't exit process - let Discord.js handle reconnection
+});
+
+client.on('warn', (info) => {
+    console.log('⚠️ Discord warning:', info);
+});
+
+// Keep-alive heartbeat (logs every 5 minutes)
+setInterval(() => {
+    if (client.isReady()) {
+        console.log(`💓 Bot alive - ${new Date().toISOString()} - Ping: ${client.ws.ping}ms`);
+    } else {
+        console.log('❌ Bot not ready! Attempting reconnection...');
+        // Force reconnection if needed
+        if (client.ws.status !== 0) { // 0 = READY
+            client.destroy();
+            setTimeout(() => {
+                client.login(process.env.DISCORD_TOKEN).catch(console.error);
+            }, 5000);
+        }
+    }
+}, 5 * 60 * 1000);
+
 client.on('interactionCreate', async (interaction) => {
+    // DEBUG LOGGING
+    console.log(`[INTERACTION] Received at ${new Date().toISOString()}`);
+    console.log(`[INTERACTION] Type: ${interaction.type}, Command: ${interaction.commandName || interaction.customId || 'N/A'}`);
+    console.log(`[INTERACTION] User: ${interaction.user?.tag || 'Unknown'}, Guild: ${interaction.guild?.id || 'DM'}`);
+    
     try {
         if (interaction.isChatInputCommand()) {
             const { commandName, options } = interaction;
+            console.log(`[COMMAND] Processing: /${commandName}`);
 
             // HINT COMMANDS
             if (['meow', 'uwu', '7u7'].includes(commandName)) {
