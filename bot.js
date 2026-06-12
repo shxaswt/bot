@@ -25,8 +25,6 @@ const client = new Client({
     ]
 });
 
-
-
 // --- MONGODB CONNECTION ---
 mongoose.connect(process.env.MONGODB_URI)
     .then(() => console.log('✅ Connected to MongoDB Atlas'))
@@ -34,19 +32,6 @@ mongoose.connect(process.env.MONGODB_URI)
         console.error('❌ MongoDB Connection Error:', err);
         process.exit(1);
     });
-
-// Monitor MongoDB connection
-mongoose.connection.on('disconnected', () => {
-    console.error('⚠️ MongoDB disconnected! Attempting to reconnect...');
-});
-
-mongoose.connection.on('reconnected', () => {
-    console.log('✅ MongoDB reconnected successfully');
-});
-
-mongoose.connection.on('error', (err) => {
-    console.error('❌ MongoDB error:', err);
-});
 
 // --- SCHEMA DEFINITION ---
 const playerSchema = new mongoose.Schema({
@@ -199,14 +184,11 @@ function getChampionIconUrl(championKey) {
 }
 
 function getSkinSplashUrl(championKey, skinNum) {
-    // Community Dragon doesn't block Discord embeds unlike ddragon CDN
-    const key = championKey.toLowerCase();
-    return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-splashes/${key}/${key}-${skinNum}.jpg`;
+    return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${championKey}_${skinNum}.jpg`;
 }
 
 function getSkinCenteredUrl(championKey, skinNum) {
-    const key = championKey.toLowerCase();
-    return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-tiles/${key}/${key}-${skinNum}.jpg`;
+    return `https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${championKey}_${skinNum}.jpg`;
 }
 
 function getChampionPrice(championId) {
@@ -1561,76 +1543,17 @@ async function handleMessageCommand(message) {
 }
 
 // --- EVENTS ---
-let isReady = false;
-
 client.on('ready', async () => {
-    if (isReady) {
-        console.log('🔄 Bot reconnected after disconnect');
-        return;
-    }
-    
-    isReady = true;
-    console.log('='.repeat(50));
-    console.log(`✅ ${client.user.tag} is online!`);
-    console.log(`📅 ${new Date().toISOString()}`);
-    console.log(`🏓 Ping: ${client.ws.ping}ms`);
-    console.log(`📊 Guilds: ${client.guilds.cache.size}`);
-    console.log('='.repeat(50));
-    
+    console.log(`✅ ${client.user.tag}`);
     await loadChampionData();
     await registerCommands();
     console.log('🎮 Ready!');
 });
 
-// Handle disconnections
-client.on('shardDisconnect', (event) => {
-    console.log('⚠️ Discord disconnected:', event.code, event.reason);
-});
-
-client.on('shardReconnecting', () => {
-    console.log('🔄 Attempting to reconnect to Discord...');
-});
-
-client.on('shardResume', (replayed) => {
-    console.log(`✅ Connection resumed. Replayed ${replayed} events.`);
-});
-
-// Enhanced error handling
-client.on('error', (error) => {
-    console.error('❌ Discord client error:', error);
-    // Don't exit process - let Discord.js handle reconnection
-});
-
-client.on('warn', (info) => {
-    console.log('⚠️ Discord warning:', info);
-});
-
-// Keep-alive heartbeat (logs every 5 minutes)
-setInterval(() => {
-    if (client.isReady()) {
-        console.log(`💓 Bot alive - ${new Date().toISOString()} - Ping: ${client.ws.ping}ms`);
-    } else {
-        console.log('❌ Bot not ready! Attempting reconnection...');
-        // Force reconnection if needed
-        if (client.ws.status !== 0) { // 0 = READY
-            client.destroy();
-            setTimeout(() => {
-                client.login(process.env.DISCORD_TOKEN).catch(console.error);
-            }, 5000);
-        }
-    }
-}, 5 * 60 * 1000);
-
 client.on('interactionCreate', async (interaction) => {
-    // DEBUG LOGGING
-    console.log(`[INTERACTION] Received at ${new Date().toISOString()}`);
-    console.log(`[INTERACTION] Type: ${interaction.type}, Command: ${interaction.commandName || interaction.customId || 'N/A'}`);
-    console.log(`[INTERACTION] User: ${interaction.user?.tag || 'Unknown'}, Guild: ${interaction.guild?.id || 'DM'}`);
-    
     try {
         if (interaction.isChatInputCommand()) {
             const { commandName, options } = interaction;
-            console.log(`[COMMAND] Processing: /${commandName}`);
 
             // HINT COMMANDS
             if (['meow', 'uwu', '7u7'].includes(commandName)) {
