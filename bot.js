@@ -199,11 +199,14 @@ function getChampionIconUrl(championKey) {
 }
 
 function getSkinSplashUrl(championKey, skinNum) {
-    return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${championKey}_${skinNum}.jpg`;
+    // Community Dragon doesn't block Discord embeds unlike ddragon CDN
+    const key = championKey.toLowerCase();
+    return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-splashes/${key}/${key}-${skinNum}.jpg`;
 }
 
 function getSkinCenteredUrl(championKey, skinNum) {
-    return `https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${championKey}_${skinNum}.jpg`;
+    const key = championKey.toLowerCase();
+    return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-tiles/${key}/${key}-${skinNum}.jpg`;
 }
 
 function getChampionPrice(championId) {
