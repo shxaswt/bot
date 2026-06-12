@@ -141,53 +141,12 @@ const ROLE_CHAMPIONS = {
     'Support': ['Mel','Alistar', 'Bard', 'Blitzcrank', 'Braum', 'Janna', 'Karma', 'Leona', 'Lulu', 'Lux', 'Maokai', 'Milio', 'Morgana', 'Nami', 'Nautilus', 'Pyke', 'Rakan', 'Rell', 'Renata', 'Senna', 'Seraphine', 'Sona', 'Soraka', 'Swain', 'TahmKench', 'Taric', 'Thresh', 'VelKoz', 'Xerath', 'Yuumi', 'Zilean', 'Zyra']
 };
 
-// --- RIOT DATA DRAGON + CDRAGON ---
+// --- RIOT DATA DRAGON ---
 let DD_VERSION = '14.1.1';
 let DD_BASE = `https://ddragon.leagueoflegends.com/cdn/${DD_VERSION}`;
 let championData = null;
 let championList = [];
 let championSkins = {};
-
-const CDRAGON_BASE = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default';
-// Maps "ChampionKey_skinNum" (e.g. "Zeri_40") -> { splashUrl, tileUrl }
-let cdragonSkinByName = {};
-
-function cdragonAssetUrl(path) {
-    if (!path) return null;
-    const relative = path.replace('/lol-game-data/assets/', '').toLowerCase();
-    return `${CDRAGON_BASE}/${relative}`;
-}
-
-async function loadCDragonSkinIndex() {
-    try {
-        console.log('Loading CDragon skin index...');
-        const response = await axios.get(`${CDRAGON_BASE}/v1/skins.json`, { timeout: 20000 });
-        const skins = response.data;
-        const tempIndex = {};
-        for (const [numericId, skin] of Object.entries(skins)) {
-            const champNumericId = Math.floor(parseInt(numericId) / 1000);
-            const skinNum = parseInt(numericId) % 1000;
-            if (!tempIndex[champNumericId]) tempIndex[champNumericId] = {};
-            tempIndex[champNumericId][skinNum] = {
-                splashUrl: cdragonAssetUrl(skin.splashPath),
-                tileUrl: cdragonAssetUrl(skin.tilePath)
-            };
-        }
-        if (championData) {
-            for (const [champKey, champ] of Object.entries(championData)) {
-                const numId = parseInt(champ.key);
-                if (tempIndex[numId]) {
-                    for (const [skinNum, urls] of Object.entries(tempIndex[numId])) {
-                        cdragonSkinByName[`${champKey}_${skinNum}`] = urls;
-                    }
-                }
-            }
-        }
-        console.log(`✅ CDragon skin index built: ${Object.keys(cdragonSkinByName).length} entries`);
-    } catch (error) {
-        console.error('Failed to load CDragon skin index:', error.message);
-    }
-}
 
 async function getLatestVersion() {
     try {
@@ -207,11 +166,8 @@ async function loadChampionData() {
         const response = await axios.get(`${DD_BASE}/data/en_US/champion.json`);
         championData = response.data.data;
         championList = Object.keys(championData);
-        championList.sort();
+        championList.sort(); 
         console.log(`✅ Loaded ${championList.length} champions`);
-
-        // Load CDragon skin URLs after champion data is ready
-        await loadCDragonSkinIndex();
     } catch (error) {
         console.error('Error loading champion data:', error);
     }
@@ -242,24 +198,22 @@ function getChampionIconUrl(championKey) {
     return `${DD_BASE}/img/champion/${championKey}.png`;
 }
 
+// CDragon paths use numeric champion IDs (e.g. 103), not string names (e.g. "Ahri")
+function getNumericChampionKey(key) {
+    if (/^\d+$/.test(key)) return key;                          // already numeric
+    const champ = championData && championData[key];
+    if (champ) return champ.key;                                // look up numeric key
+    return key.toLowerCase();                                   // last-resort fallback
+}
+
 function getSkinSplashUrl(championKey, skinNum) {
-    const indexKey = `${championKey}_${skinNum}`;
-    const entry = cdragonSkinByName[indexKey];
-    if (entry && entry.splashUrl) return entry.splashUrl;
-    // fallback: base skin splash (skinNum 0) or try with 0
-    const baseEntry = cdragonSkinByName[`${championKey}_0`];
-    if (baseEntry && baseEntry.splashUrl) return baseEntry.splashUrl;
-    // last resort ddragon (may 403 in Discord but won't crash)
-    return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${championKey}_${skinNum}.jpg`;
+    const id = getNumericChampionKey(championKey);
+    return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-splashes/${id}/${id}-${skinNum}.jpg`;
 }
 
 function getSkinCenteredUrl(championKey, skinNum) {
-    // Use CDragon loading screen art (portrait half-body, distinct from splash)
-    const name = championKey.toLowerCase();
-    if (skinNum === 0) {
-        return `${CDRAGON_BASE}/assets/characters/${name}/skins/base/${name}loadscreen.jpg`;
-    }
-    return `${CDRAGON_BASE}/assets/characters/${name}/skins/skin${skinNum}/${name}loadscreen_${skinNum}.jpg`;
+    const id = getNumericChampionKey(championKey);
+    return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-tiles/${id}/${id}-${skinNum}.jpg`;
 }
 
 function getChampionPrice(championId) {
@@ -411,10 +365,10 @@ async function getRandomContent(mode, difficulty, pixelate = false) {
     } else if (mode === 'skin') {
         const skins = champDetails.skins.filter(s => s.num !== 0);
         if (skins.length === 0) {
-            imageUrl = getSkinCenteredUrl(randomChamp, 0);
+            imageUrl = getSkinSplashUrl(randomChamp, 0);
         } else {
             const randomSkin = skins[Math.floor(Math.random() * skins.length)];
-            imageUrl = getSkinCenteredUrl(randomChamp, randomSkin.num);
+            imageUrl = getSkinSplashUrl(randomChamp, randomSkin.num);
         }
         processedImage = await processImage(imageUrl, mode, difficulty, pixelate);
     }
@@ -997,7 +951,7 @@ async function generateLootItem() {
                 type: 'skin', 
                 data: {
                     id: `${randomChamp}_${randomSkin.num}`,
-                    championId: randomChamp,
+                    championId: champDetails.key,  // numeric ID for CDragon URLs
                     championName: champDetails.name,
                     skinName: randomSkin.name,
                     skinNum: randomSkin.num,
@@ -1546,7 +1500,7 @@ async function handleMessageCommand(message) {
         
         const newSkin = {
             id: `${randomChamp}_${randomSkin.num}`,
-            championId: randomChamp,
+            championId: champDetails.key,
             championName: champDetails.name,
             skinName: randomSkin.name,
             skinNum: randomSkin.num,
@@ -1604,6 +1558,12 @@ async function handleMessageCommand(message) {
             deferred: false,
             replied: false,
             deferReply: async () => {},
+            reply: async (data) => {
+                // message-based replies don't support ephemeral — just send content/embeds
+                if (typeof data === 'string') return message.reply(data);
+                const { content, embeds, files } = data;
+                return message.reply({ ...(content && { content }), ...(embeds && { embeds }), ...(files && { files }) });
+            },
             editReply: async (data) => { await message.reply(data); },
             followUp: async (data) => { await message.channel.send(data); }
         };
@@ -1906,7 +1866,7 @@ client.on('interactionCreate', async (interaction) => {
                 
                 const newSkin = {
                     id: `${randomChamp}_${randomSkin.num}`,
-                    championId: randomChamp,
+                    championId: champDetails.key,
                     championName: champDetails.name,
                     skinName: randomSkin.name,
                     skinNum: randomSkin.num,
