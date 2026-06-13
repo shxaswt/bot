@@ -199,15 +199,23 @@ function getChampionIconUrl(championKey) {
 }
 
 function getSkinSplashUrl(championKey, skinNum) {
-    // Fetch the numeric ID (e.g., 103 for Ahri) from the global championData
-    const numericId = championData[championKey].key;
-    return `https://cdn.communitydragon.org/latest/champion/${numericId}/splash-art/skin/${skinNum}`;
+    // Use cdn.communitydragon.org with numeric champion ID (e.g. 103 for Ahri)
+    const numericId = championData && championData[championKey] ? championData[championKey].key : null;
+    if (numericId) {
+        return `https://cdn.communitydragon.org/latest/champion/${numericId}/splash-art/skin/${skinNum}`;
+    }
+    // Fallback to Data Dragon if champion data not loaded yet
+    return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${championKey}_${skinNum}.jpg`;
 }
 
 function getSkinCenteredUrl(championKey, skinNum) {
-    const numericId = championData[championKey].key;
-    // The CDN equivalent for "champion-tiles" is "tile"
-    return `https://cdn.communitydragon.org/latest/champion/${numericId}/tile/skin/${skinNum}`;
+    // Use cdn.communitydragon.org with numeric champion ID (e.g. 103 for Ahri)
+    const numericId = championData && championData[championKey] ? championData[championKey].key : null;
+    if (numericId) {
+        return `https://cdn.communitydragon.org/latest/champion/${numericId}/splash-art/skin/${skinNum}`;
+    }
+    // Fallback to Data Dragon if champion data not loaded yet
+    return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${championKey}_${skinNum}.jpg`;
 }
 
 function getChampionPrice(championId) {
