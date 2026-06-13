@@ -295,10 +295,19 @@ function pixelateImage(canvas, ctx, image, pixelSize) {
 }
 
 async function processImage(imageUrl, mode, difficulty, pixelate = false) {
+    console.log(`[IMG] Fetching | mode=${mode} difficulty=${difficulty} pixelate=${pixelate}`);
+    console.log(`[IMG] URL: ${imageUrl}`);
     try {
-        const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+        const response = await axios.get(imageUrl, {
+            responseType: 'arraybuffer',
+            timeout: 12000,
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LoLBot/1.0)' }
+        });
+        console.log(`[IMG] Fetch OK — HTTP ${response.status} | ${response.data.byteLength} bytes`);
+
         const image = await Canvas.loadImage(Buffer.from(response.data));
-        
+        console.log(`[IMG] Canvas loaded — ${image.width}x${image.height}px`);
+
         if (mode === 'splash' || mode === 'skin') {
             const canvas = Canvas.createCanvas(400, 400);
             const ctx = canvas.getContext('2d');
@@ -309,22 +318,37 @@ async function processImage(imageUrl, mode, difficulty, pixelate = false) {
             const maxY = Math.max(0, image.height - cropSize);
             const cropX = Math.floor(Math.random() * maxX);
             const cropY = Math.floor(Math.random() * maxY);
+            console.log(`[IMG] Crop — zoom=${zoom} size=${Math.round(cropSize)} at (${Math.round(cropX)},${Math.round(cropY)})`);
             ctx.drawImage(image, cropX, cropY, cropSize, cropSize, 0, 0, 400, 400);
             if (pixelate) {
                 const pixelSizes = { easy: 8, normal: 12, hard: 16 };
                 pixelateImage(canvas, ctx, canvas, pixelSizes[difficulty] || 10);
+                console.log(`[IMG] Pixelated — blockSize=${pixelSizes[difficulty] || 10}`);
             }
-            return canvas.toBuffer();
+            const buffer = canvas.toBuffer();
+            console.log(`[IMG] Buffer ready — ${buffer.length} bytes`);
+            return buffer;
         } else if (mode === 'ability' && pixelate) {
             const canvas = Canvas.createCanvas(image.width, image.height);
             const ctx = canvas.getContext('2d');
             ctx.drawImage(image, 0, 0);
             const pixelSizes = { easy: 5, normal: 7.5, hard: 12, v2: 8, v3: 8 };
             pixelateImage(canvas, ctx, canvas, pixelSizes[difficulty] || 8);
-            return canvas.toBuffer();
+            const buffer = canvas.toBuffer();
+            console.log(`[IMG] Ability pixelated buffer — ${buffer.length} bytes`);
+            return buffer;
         }
+        console.log(`[IMG] No processing needed (non-pixelated ability)`);
         return null;
     } catch (error) {
+        console.error(`[IMG] FAILED to process image!`);
+        console.error(`[IMG] URL: ${imageUrl}`);
+        console.error(`[IMG] Error: ${error.message}`);
+        if (error.response) {
+            console.error(`[IMG] HTTP Status: ${error.response.status} ${error.response.statusText}`);
+        } else if (error.code) {
+            console.error(`[IMG] Network code: ${error.code}`);
+        }
         return null;
     }
 }
@@ -332,9 +356,9 @@ async function processImage(imageUrl, mode, difficulty, pixelate = false) {
 async function getRandomContent(mode, difficulty, pixelate = false) {
     const randomChamp = championList[Math.floor(Math.random() * championList.length)];
     const champDetails = await getChampionDetails(randomChamp);
-    if (!champDetails) return null;
-    
+    if (!champDetails) { console.error(`[GAME] Failed to load details for: ${randomChamp}`); return null; }
     let imageUrl, contentType, abilityKey, abilityName, processedImage = null;
+    console.log(`[GAME] Mode=${mode} Difficulty=${difficulty} Pixelate=${pixelate} Champion=${champDetails.name} (${randomChamp})`);
     
     if (mode === 'ability') {
         const abilityIndex = Math.floor(Math.random() * 5);
@@ -365,6 +389,8 @@ async function getRandomContent(mode, difficulty, pixelate = false) {
         processedImage = await processImage(imageUrl, mode, difficulty, pixelate);
     }
     
+    console.log(`[GAME] Image URL: ${imageUrl}`);
+    console.log(`[GAME] processedImage: ${processedImage ? processedImage.length + ' bytes' : 'NULL (will use direct URL)'}`);
     return {
         champion: champDetails.name,
         championKey: randomChamp,
@@ -422,6 +448,7 @@ async function startGame(interaction, mode, difficulty, pixelate, elimination = 
     const modeData = GAME_MODES[mode];
     const content = await getRandomContent(mode, difficulty, pixelate);
     if (!content) return interaction.editReply('❌ Failed to load data');
+    console.log(`[GAME] Content loaded — champ=${content.champion} imageUrl=${content.imageUrl} processedImage=${content.processedImage ? content.processedImage.length + 'b' : 'null'}`);
     
     const points = pixelate ? (difficultyData.basePoints + difficultyData.pixelateBonus) : difficultyData.basePoints;
     
@@ -439,10 +466,12 @@ async function startGame(interaction, mode, difficulty, pixelate, elimination = 
     
     let files = [];
     if (content.processedImage) {
+        console.log(`[GAME] Using ATTACHMENT (${content.processedImage.length} bytes)`);
         const attachment = new AttachmentBuilder(content.processedImage, { name: 'champion.png' });
         embed.setImage('attachment://champion.png');
         files.push(attachment);
     } else {
+        console.log(`[GAME] Using DIRECT URL (no processedImage): ${content.imageUrl}`);
         embed.setImage(content.imageUrl);
     }
     
@@ -1095,6 +1124,31 @@ async function claimDaily(userId, username) {
     return { success: true, rewards };
 }
 
+
+// --- STARTUP IMAGE TEST ---
+async function testImageFetch() {
+    const tests = [
+        'https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_3.jpg',
+        'https://ddragon.leagueoflegends.com/cdn/img/champion/loading/Ahri_3.jpg',
+        'https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Caitlyn_0.jpg'
+    ];
+    console.log('[STARTUP] Running image URL tests...');
+    for (const url of tests) {
+        try {
+            const res = await axios.get(url, {
+                responseType: 'arraybuffer',
+                timeout: 10000,
+                headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LoLBot/1.0)' }
+            });
+            console.log(`[STARTUP] OK  ${res.status} | ${res.data.byteLength} bytes | ${url}`);
+        } catch (err) {
+            console.error(`[STARTUP] FAIL | ${err.message} | ${url}`);
+            if (err.response) console.error(`[STARTUP] HTTP ${err.response.status}`);
+        }
+    }
+    console.log('[STARTUP] Image tests complete.');
+}
+
 // --- SLASH COMMAND REGISTRATION ---
 async function registerCommands() {
     if (!process.env.CLIENT_ID) return;
@@ -1577,6 +1631,7 @@ client.on('ready', async () => {
     console.log('='.repeat(50));
     
     await loadChampionData();
+    await testImageFetch();
     await registerCommands();
     console.log('🎮 Ready!');
 });
