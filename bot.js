@@ -199,23 +199,13 @@ function getChampionIconUrl(championKey) {
 }
 
 function getSkinSplashUrl(championKey, skinNum) {
-    // Use cdn.communitydragon.org with numeric champion ID (e.g. 103 for Ahri)
-    const numericId = championData && championData[championKey] ? championData[championKey].key : null;
-    if (numericId) {
-        return `https://cdn.communitydragon.org/latest/champion/${numericId}/splash-art/skin/${skinNum}`;
-    }
-    // Fallback to Data Dragon if champion data not loaded yet
+    // Wide landscape splash art — used for the guessing game
     return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${championKey}_${skinNum}.jpg`;
 }
 
 function getSkinCenteredUrl(championKey, skinNum) {
-    // Use cdn.communitydragon.org with numeric champion ID (e.g. 103 for Ahri)
-    const numericId = championData && championData[championKey] ? championData[championKey].key : null;
-    if (numericId) {
-        return `https://cdn.communitydragon.org/latest/champion/${numericId}/splash-art/skin/${skinNum}`;
-    }
-    // Fallback to Data Dragon if champion data not loaded yet
-    return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${championKey}_${skinNum}.jpg`;
+    // Portrait loading screen art — used for inventory, loot, trades, crafting
+    return `https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${championKey}_${skinNum}.jpg`;
 }
 
 function getChampionPrice(championId) {
