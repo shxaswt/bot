@@ -208,6 +208,49 @@ function getSkinCenteredUrl(championKey, skinNum) {
     return `https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${championKey}_${skinNum}.jpg`;
 }
 
+// Probe a URL — returns true if the CDN has the file (200/206), false on 403/404
+async function probeUrl(url) {
+    try {
+        const res = await axios.head(url, {
+            timeout: 6000,
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LoLBot/1.0)' }
+        });
+        return res.status >= 200 && res.status < 300;
+    } catch (err) {
+        // Some CDNs reject HEAD — fall back to a 1-byte GET
+        try {
+            await axios.get(url, {
+                timeout: 6000,
+                responseType: 'arraybuffer',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (compatible; LoLBot/1.0)',
+                    'Range': 'bytes=0-0'
+                }
+            });
+            return true;
+        } catch { return false; }
+    }
+}
+
+// Shuffle skins and return the first one whose loading-screen URL is reachable.
+// Falls back to null if every non-default skin 403s.
+async function pickValidSkin(championKey, skins) {
+    const nonDefault = skins.filter(s => s.num !== 0);
+    if (nonDefault.length === 0) return null;
+    const shuffled = [...nonDefault].sort(() => Math.random() - 0.5);
+    for (const skin of shuffled) {
+        const url = getSkinCenteredUrl(championKey, skin.num);
+        const ok = await probeUrl(url);
+        if (ok) {
+            console.log(`[SKIN] OK  ${championKey}_${skin.num} — ${skin.name}`);
+            return skin;
+        }
+        console.log(`[SKIN] 403 ${championKey}_${skin.num} — ${skin.name}, skipping`);
+    }
+    console.warn(`[SKIN] All skins 403 for ${championKey}, no valid skin found`);
+    return null;
+}
+
 function getChampionPrice(championId) {
     let hash = 0;
     for (let i = 0; i < championId.length; i++) {
@@ -379,14 +422,26 @@ async function getRandomContent(mode, difficulty, pixelate = false) {
         imageUrl = getSkinSplashUrl(randomChamp, 0);
         processedImage = await processImage(imageUrl, mode, difficulty, pixelate);
     } else if (mode === 'skin') {
-        const skins = champDetails.skins.filter(s => s.num !== 0);
-        if (skins.length === 0) {
-            imageUrl = getSkinSplashUrl(randomChamp, 0);
-        } else {
-            const randomSkin = skins[Math.floor(Math.random() * skins.length)];
-            imageUrl = getSkinSplashUrl(randomChamp, randomSkin.num);
+        // Iterate through shuffled skins until processImage succeeds (avoids 403 on high-num skins)
+        const availableSkins = [...champDetails.skins.filter(s => s.num !== 0)]
+            .sort(() => Math.random() - 0.5);
+        for (const skin of availableSkins) {
+            const tryUrl = getSkinSplashUrl(randomChamp, skin.num);
+            const tryImage = await processImage(tryUrl, mode, difficulty, pixelate);
+            if (tryImage) {
+                imageUrl = tryUrl;
+                processedImage = tryImage;
+                console.log(`[GAME] Skin OK — ${randomChamp}_${skin.num} (${skin.name})`);
+                break;
+            }
+            console.log(`[GAME] Skin FAIL — ${randomChamp}_${skin.num} (${skin.name}), trying next`);
         }
-        processedImage = await processImage(imageUrl, mode, difficulty, pixelate);
+        // Last resort: default skin (always exists)
+        if (!processedImage) {
+            console.warn(`[GAME] All non-default skins failed for ${randomChamp}, using skin 0`);
+            imageUrl = getSkinSplashUrl(randomChamp, 0);
+            processedImage = await processImage(imageUrl, mode, difficulty, pixelate);
+        }
     }
     
     console.log(`[GAME] Image URL: ${imageUrl}`);
@@ -956,10 +1011,8 @@ async function generateLootItem() {
         const champDetails = await getChampionDetails(randomChamp);
         
         if (champDetails && champDetails.skins.length > 0) {
-            const skins = champDetails.skins.filter(s => s.num !== 0);
-            if (skins.length === 0) return generateLootItem(); 
-            
-            const randomSkin = skins[Math.floor(Math.random() * skins.length)];
+            const validSkin = await pickValidSkin(randomChamp, champDetails.skins);
+            if (!validSkin) return generateLootItem(); // retry with different champ
             
             const rarityRoll = Math.random();
             let rarity;
@@ -971,11 +1024,11 @@ async function generateLootItem() {
             return {
                 type: 'skin', 
                 data: {
-                    id: `${randomChamp}_${randomSkin.num}`,
+                    id: `${randomChamp}_${validSkin.num}`,
                     championId: randomChamp,
                     championName: champDetails.name,
-                    skinName: randomSkin.name,
-                    skinNum: randomSkin.num,
+                    skinName: validSkin.name,
+                    skinNum: validSkin.num,
                     rarity: rarity
                 }
             };
@@ -1541,15 +1594,15 @@ async function handleMessageCommand(message) {
         
         const randomChamp = championList[Math.floor(Math.random() * championList.length)];
         const champDetails = await getChampionDetails(randomChamp);
-        const skins = champDetails.skins.filter(s => s.num !== 0);
-        const randomSkin = skins.length > 0 ? skins[Math.floor(Math.random() * skins.length)] : champDetails.skins[0];
+        const validSkin = await pickValidSkin(randomChamp, champDetails ? champDetails.skins : []);
+        if (!validSkin) return message.reply('❌ Could not find a valid skin, please try again!');
         
         const newSkin = {
-            id: `${randomChamp}_${randomSkin.num}`,
+            id: `${randomChamp}_${validSkin.num}`,
             championId: randomChamp,
             championName: champDetails.name,
-            skinName: randomSkin.name,
-            skinNum: randomSkin.num,
+            skinName: validSkin.name,
+            skinNum: validSkin.num,
             rarity: 'EPIC'
         };
         
@@ -1902,15 +1955,15 @@ client.on('interactionCreate', async (interaction) => {
                 
                 const randomChamp = championList[Math.floor(Math.random() * championList.length)];
                 const champDetails = await getChampionDetails(randomChamp);
-                const skins = champDetails.skins.filter(s => s.num !== 0);
-                const randomSkin = skins.length > 0 ? skins[Math.floor(Math.random() * skins.length)] : champDetails.skins[0];
+                const validSkin = await pickValidSkin(randomChamp, champDetails ? champDetails.skins : []);
+                if (!validSkin) return interaction.reply({ content: '❌ Could not find a valid skin, please try again!', flags: MessageFlags.Ephemeral });
                 
                 const newSkin = {
-                    id: `${randomChamp}_${randomSkin.num}`,
+                    id: `${randomChamp}_${validSkin.num}`,
                     championId: randomChamp,
                     championName: champDetails.name,
-                    skinName: randomSkin.name,
-                    skinNum: randomSkin.num,
+                    skinName: validSkin.name,
+                    skinNum: validSkin.num,
                     rarity: 'EPIC'
                 };
                 
