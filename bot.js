@@ -198,26 +198,16 @@ function getChampionIconUrl(championKey) {
     return `${DD_BASE}/img/champion/${championKey}.png`;
 }
 
-// CDragon paths use numeric champion IDs (e.g. 103), not string names (e.g. "Ahri")
-function getNumericChampionKey(key) {
-    if (/^\d+$/.test(key)) return key;                          // already numeric
-    const champ = championData && championData[key];
-    if (champ) return champ.key;                                // look up numeric key
-    return key.toLowerCase();                                   // last-resort fallback
-}
-
 function getSkinSplashUrl(championKey, skinNum) {
-    const id = getNumericChampionKey(championKey);
-    // CDragon filenames use the full skin ID: champId*1000 + skinNum
-    // e.g. Ahri (103) skin 1 → 103001.jpg, Amumu (33) skin 7 → 33007.jpg
-    const fullSkinId = parseInt(id) * 1000 + parseInt(skinNum);
-    return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-splashes/${id}/${fullSkinId}.jpg`;
+    // Fetch the numeric ID (e.g., 103 for Ahri) from the global championData
+    const numericId = championData[championKey].key;
+    return `https://cdn.communitydragon.org/latest/champion/${numericId}/splash-art/skin/${skinNum}`;
 }
 
 function getSkinCenteredUrl(championKey, skinNum) {
-    const id = getNumericChampionKey(championKey);
-    const fullSkinId = parseInt(id) * 1000 + parseInt(skinNum);
-    return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-tiles/${id}/${fullSkinId}.jpg`;
+    const numericId = championData[championKey].key;
+    // The CDN equivalent for "champion-tiles" is "tile"
+    return `https://cdn.communitydragon.org/latest/champion/${numericId}/tile/skin/${skinNum}`;
 }
 
 function getChampionPrice(championId) {
@@ -955,7 +945,7 @@ async function generateLootItem() {
                 type: 'skin', 
                 data: {
                     id: `${randomChamp}_${randomSkin.num}`,
-                    championId: champDetails.key,  // numeric ID for CDragon URLs
+                    championId: randomChamp,
                     championName: champDetails.name,
                     skinName: randomSkin.name,
                     skinNum: randomSkin.num,
@@ -1504,7 +1494,7 @@ async function handleMessageCommand(message) {
         
         const newSkin = {
             id: `${randomChamp}_${randomSkin.num}`,
-            championId: champDetails.key,
+            championId: randomChamp,
             championName: champDetails.name,
             skinName: randomSkin.name,
             skinNum: randomSkin.num,
@@ -1562,12 +1552,6 @@ async function handleMessageCommand(message) {
             deferred: false,
             replied: false,
             deferReply: async () => {},
-            reply: async (data) => {
-                // message-based replies don't support ephemeral — just send content/embeds
-                if (typeof data === 'string') return message.reply(data);
-                const { content, embeds, files } = data;
-                return message.reply({ ...(content && { content }), ...(embeds && { embeds }), ...(files && { files }) });
-            },
             editReply: async (data) => { await message.reply(data); },
             followUp: async (data) => { await message.channel.send(data); }
         };
@@ -1870,7 +1854,7 @@ client.on('interactionCreate', async (interaction) => {
                 
                 const newSkin = {
                     id: `${randomChamp}_${randomSkin.num}`,
-                    championId: champDetails.key,
+                    championId: randomChamp,
                     championName: champDetails.name,
                     skinName: randomSkin.name,
                     skinNum: randomSkin.num,
